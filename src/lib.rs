@@ -4,8 +4,9 @@
 //! Whole Slide Images stored in cloud object storage using HTTP range requests.
 
 pub mod error;
-pub mod format;
 pub mod io;
+pub mod slide;
+pub mod format;
 
 // Re-export commonly used types
 pub use error::{FormatError, IoError, TiffError};
@@ -22,3 +23,4 @@ pub use format::{
     is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
+pub use slide::{LevelInfo, SlideReader};
