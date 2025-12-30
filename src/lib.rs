@@ -8,4 +8,4 @@ pub mod io;
 
 // Re-export commonly used types
 pub use error::IoError;
-pub use io::{RangeReader, S3RangeReader, create_s3_client};
+pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};

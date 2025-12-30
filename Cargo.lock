@@ -2407,6 +2407,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "bytes",
+ "lru",
  "thiserror",
  "tokio",
 ]
