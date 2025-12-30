@@ -26,6 +26,7 @@ pub use format::{
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
 pub use slide::{CachedSlide, LevelInfo, SlideReader, SlideRegistry, SlideSource};
 pub use tile::{
-    JpegTileEncoder, TileCache, TileCacheKey, DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY,
-    MAX_JPEG_QUALITY, MIN_JPEG_QUALITY, clamp_quality, is_valid_quality,
+    JpegTileEncoder, TileCache, TileCacheKey, TileRequest, TileResponse, TileService,
+    DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
+    clamp_quality, is_valid_quality,
 };
