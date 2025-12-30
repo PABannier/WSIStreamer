@@ -6,6 +6,7 @@
 pub mod error;
 pub mod format;
 pub mod io;
+pub mod server;
 pub mod slide;
 pub mod tile;
 
@@ -29,4 +30,8 @@ pub use tile::{
     JpegTileEncoder, TileCache, TileCacheKey, TileRequest, TileResponse, TileService,
     DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
     clamp_quality, is_valid_quality,
+};
+pub use server::{
+    AppState, ErrorResponse, HealthResponse, TilePathParams, TileQueryParams,
+    health_handler, tile_handler,
 };
