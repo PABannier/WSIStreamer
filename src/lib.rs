@@ -16,4 +16,8 @@ pub use format::tiff::{
     parse_u64_array, validate_ifd, validate_ifd_strict, validate_level, validate_pyramid,
 };
 pub use format::{SlideFormat, detect_format, is_tiff_header};
+pub use format::{
+    SvsLevelData, SvsMetadata, SvsReader,
+    is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
+};
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
