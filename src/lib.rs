@@ -23,4 +23,4 @@ pub use format::{
     is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
-pub use slide::{LevelInfo, SlideReader};
+pub use slide::{CachedSlide, LevelInfo, SlideReader, SlideRegistry, SlideSource};
