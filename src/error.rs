@@ -24,6 +24,22 @@ pub enum IoError {
     NotFound(String),
 }
 
+/// Errors related to format detection and validation
+#[derive(Debug, Error)]
+pub enum FormatError {
+    /// I/O error while reading the file
+    #[error("I/O error: {0}")]
+    Io(#[from] IoError),
+
+    /// TIFF parsing error
+    #[error("TIFF error: {0}")]
+    Tiff(#[from] TiffError),
+
+    /// File format is not supported (should map to HTTP 415)
+    #[error("Unsupported format: {reason}")]
+    UnsupportedFormat { reason: String },
+}
+
 /// Errors that can occur when parsing TIFF files
 #[derive(Debug, Error)]
 pub enum TiffError {
