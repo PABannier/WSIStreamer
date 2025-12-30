@@ -17,6 +17,7 @@ pub use format::tiff::{
 };
 pub use format::{SlideFormat, detect_format, is_tiff_header};
 pub use format::{
+    GenericTiffLevelData, GenericTiffReader,
     SvsLevelData, SvsMetadata, SvsReader,
     is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
 };
