@@ -10,8 +10,17 @@
 //!
 //! - **Aperio SVS**: Identified by "Aperio" marker in ImageDescription
 //! - **Generic Pyramidal TIFF**: Standard tiled TIFF with pyramid structure
+//!
+//! # Reading Slides
+//!
+//! - Use [`svs::SvsReader`] for Aperio SVS files
+//! - The SVS reader handles JPEGTables merging automatically
 
 pub mod detect;
+pub mod jpeg;
+pub mod svs;
 pub mod tiff;
 
 pub use detect::{detect_format, is_tiff_header, SlideFormat};
+pub use jpeg::{is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg};
+pub use svs::{SvsLevelData, SvsMetadata, SvsReader};
