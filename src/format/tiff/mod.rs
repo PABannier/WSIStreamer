@@ -18,9 +18,11 @@
 //!   larger values are stored at an offset pointed to by the entry.
 
 mod parser;
+mod pyramid;
 mod tags;
 mod values;
 
 pub use parser::{ByteOrder, Ifd, IfdEntry, TiffHeader, BIGTIFF_HEADER_SIZE, TIFF_HEADER_SIZE};
+pub use pyramid::{PyramidLevel, TiffPyramid, TileData};
 pub use tags::{Compression, FieldType, TiffTag};
 pub use values::{ValueReader, parse_u32_array, parse_u64_array};
