@@ -454,7 +454,7 @@ pub struct Ifd {
     pub entries: Vec<IfdEntry>,
 
     /// Entries indexed by tag ID for fast lookup
-    entries_by_tag: HashMap<u16, usize>,
+    pub(crate) entries_by_tag: HashMap<u16, usize>,
 
     /// Offset to the next IFD (0 if this is the last IFD)
     pub next_ifd_offset: u64,

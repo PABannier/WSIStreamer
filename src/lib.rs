@@ -11,7 +11,8 @@ pub mod io;
 pub use error::{IoError, TiffError};
 pub use format::tiff::{
     ByteOrder, Compression, FieldType, Ifd, IfdEntry, PyramidLevel, TiffHeader, TiffPyramid,
-    TiffTag, TileData, ValueReader, BIGTIFF_HEADER_SIZE, TIFF_HEADER_SIZE, parse_u32_array,
-    parse_u64_array,
+    TiffTag, TileData, ValidationError, ValidationResult, ValueReader, BIGTIFF_HEADER_SIZE,
+    TIFF_HEADER_SIZE, check_compression, check_tile_tags, check_tiled, parse_u32_array,
+    parse_u64_array, validate_ifd, validate_ifd_strict, validate_level, validate_pyramid,
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
