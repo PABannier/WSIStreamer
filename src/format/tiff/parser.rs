@@ -623,6 +623,16 @@ impl Ifd {
     pub fn entry_count(&self) -> usize {
         self.entries.len()
     }
+
+    /// Create an empty IFD (for testing).
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Ifd {
+            entries: Vec::new(),
+            entries_by_tag: HashMap::new(),
+            next_ifd_offset: 0,
+        }
+    }
 }
 
 // =============================================================================
