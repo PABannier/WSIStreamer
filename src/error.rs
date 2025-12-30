@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// I/O errors that can occur when reading from remote storage
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum IoError {
     /// Error from S3 or S3-compatible storage
     #[error("S3 error: {0}")]
@@ -25,7 +25,7 @@ pub enum IoError {
 }
 
 /// Errors related to format detection and validation
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum FormatError {
     /// I/O error while reading the file
     #[error("I/O error: {0}")]
@@ -41,7 +41,7 @@ pub enum FormatError {
 }
 
 /// Errors that can occur when parsing TIFF files
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum TiffError {
     /// I/O error while reading the file
     #[error("I/O error: {0}")]
