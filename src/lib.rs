@@ -10,7 +10,7 @@ pub mod slide;
 pub mod tile;
 
 // Re-export commonly used types
-pub use error::{FormatError, IoError, TiffError};
+pub use error::{FormatError, IoError, TiffError, TileError};
 pub use format::tiff::{
     ByteOrder, Compression, FieldType, Ifd, IfdEntry, PyramidLevel, TiffHeader, TiffPyramid,
     TiffTag, TileData, ValidationError, ValidationResult, ValueReader, BIGTIFF_HEADER_SIZE,
@@ -25,4 +25,7 @@ pub use format::{
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
 pub use slide::{CachedSlide, LevelInfo, SlideReader, SlideRegistry, SlideSource};
-pub use tile::{TileCache, TileCacheKey, DEFAULT_TILE_CACHE_CAPACITY};
+pub use tile::{
+    JpegTileEncoder, TileCache, TileCacheKey, DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY,
+    MAX_JPEG_QUALITY, MIN_JPEG_QUALITY, clamp_quality, is_valid_quality,
+};

@@ -32,6 +32,7 @@
 //!
 //! - [`TileCache`]: LRU cache for encoded JPEG tiles with size-based eviction
 //! - [`TileCacheKey`]: Composite key for tile identification (slide, level, coords, quality)
+//! - [`JpegTileEncoder`]: Decodes source JPEG and re-encodes at requested quality
 //!
 //! # Example
 //!
@@ -60,5 +61,10 @@
 //! ```
 
 mod cache;
+mod encoder;
 
 pub use cache::{TileCache, TileCacheKey, DEFAULT_TILE_CACHE_CAPACITY};
+pub use encoder::{
+    JpegTileEncoder, DEFAULT_JPEG_QUALITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
+    clamp_quality, is_valid_quality,
+};
