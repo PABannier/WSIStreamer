@@ -87,3 +87,45 @@ pub enum TiffError {
     #[error("Unknown field type: {0}")]
     UnknownFieldType(u16),
 }
+
+/// Errors that can occur when processing tiles
+#[derive(Debug, Clone, Error)]
+pub enum TileError {
+    /// I/O error while reading tile data
+    #[error("I/O error: {0}")]
+    Io(#[from] IoError),
+
+    /// TIFF/slide parsing error
+    #[error("Slide error: {0}")]
+    Slide(#[from] TiffError),
+
+    /// Error decoding source JPEG
+    #[error("Failed to decode JPEG: {message}")]
+    DecodeError { message: String },
+
+    /// Error encoding output JPEG
+    #[error("Failed to encode JPEG: {message}")]
+    EncodeError { message: String },
+
+    /// Requested pyramid level does not exist
+    #[error("Invalid level: {level} (slide has {max_levels} levels)")]
+    InvalidLevel { level: usize, max_levels: usize },
+
+    /// Requested tile coordinates are out of bounds
+    #[error("Tile coordinates out of bounds: ({x}, {y}) at level {level} (max: {max_x}, {max_y})")]
+    TileOutOfBounds {
+        level: usize,
+        x: u32,
+        y: u32,
+        max_x: u32,
+        max_y: u32,
+    },
+
+    /// Slide not found
+    #[error("Slide not found: {slide_id}")]
+    SlideNotFound { slide_id: String },
+
+    /// Invalid quality parameter
+    #[error("Invalid quality: {quality} (must be 1-100)")]
+    InvalidQuality { quality: u8 },
+}
