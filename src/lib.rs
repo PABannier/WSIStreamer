@@ -10,6 +10,7 @@ pub mod io;
 // Re-export commonly used types
 pub use error::{IoError, TiffError};
 pub use format::tiff::{
-    ByteOrder, Compression, FieldType, TiffHeader, TiffTag, BIGTIFF_HEADER_SIZE, TIFF_HEADER_SIZE,
+    ByteOrder, Compression, FieldType, Ifd, IfdEntry, TiffHeader, TiffTag, BIGTIFF_HEADER_SIZE,
+    TIFF_HEADER_SIZE,
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};

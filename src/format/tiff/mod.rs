@@ -20,5 +20,5 @@
 mod parser;
 mod tags;
 
-pub use parser::{ByteOrder, TiffHeader, BIGTIFF_HEADER_SIZE, TIFF_HEADER_SIZE};
+pub use parser::{ByteOrder, Ifd, IfdEntry, TiffHeader, BIGTIFF_HEADER_SIZE, TIFF_HEADER_SIZE};
 pub use tags::{Compression, FieldType, TiffTag};

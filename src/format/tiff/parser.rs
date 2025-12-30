@@ -21,8 +21,12 @@
 //! Bytes 8-15: Offset to first IFD (8 bytes)
 //! ```
 
+use std::collections::HashMap;
+
 use crate::error::TiffError;
 use crate::io::{read_u16_be, read_u16_le, read_u32_be, read_u32_le, read_u64_be, read_u64_le};
+
+use super::tags::{FieldType, TiffTag};
 
 // =============================================================================
 // Constants
@@ -252,6 +256,372 @@ impl TiffHeader {
         } else {
             4
         }
+    }
+}
+
+// =============================================================================
+// IfdEntry
+// =============================================================================
+
+/// A single entry in an IFD (Image File Directory).
+///
+/// Each entry describes one piece of metadata about the image. The value may be
+/// stored inline (in the `value_offset` field) or at a separate offset in the file.
+///
+/// ## Classic TIFF Entry Layout (12 bytes)
+/// ```text
+/// Bytes 0-1:  Tag ID (u16)
+/// Bytes 2-3:  Field type (u16)
+/// Bytes 4-7:  Count (u32)
+/// Bytes 8-11: Value or offset (u32)
+/// ```
+///
+/// ## BigTIFF Entry Layout (20 bytes)
+/// ```text
+/// Bytes 0-1:   Tag ID (u16)
+/// Bytes 2-3:   Field type (u16)
+/// Bytes 4-11:  Count (u64)
+/// Bytes 12-19: Value or offset (u64)
+/// ```
+#[derive(Debug, Clone)]
+pub struct IfdEntry {
+    /// The tag ID (may be a known TiffTag or unknown)
+    pub tag_id: u16,
+
+    /// The field type (None if unknown type)
+    pub field_type: Option<FieldType>,
+
+    /// Raw field type value (for error reporting)
+    pub field_type_raw: u16,
+
+    /// Number of values (not bytes!)
+    pub count: u64,
+
+    /// Raw bytes of the value/offset field.
+    /// For classic TIFF: 4 bytes, for BigTIFF: 8 bytes.
+    /// Contains either the actual value (if inline) or an offset to the value.
+    pub value_offset_bytes: Vec<u8>,
+
+    /// Whether the value is stored inline (true) or at an offset (false)
+    pub is_inline: bool,
+}
+
+impl IfdEntry {
+    /// Parse an IFD entry from raw bytes.
+    ///
+    /// # Arguments
+    /// * `bytes` - Raw entry bytes (12 for TIFF, 20 for BigTIFF)
+    /// * `header` - The TIFF header (provides byte order and format info)
+    fn parse(bytes: &[u8], header: &TiffHeader) -> Self {
+        let byte_order = header.byte_order;
+
+        // Tag ID (2 bytes)
+        let tag_id = byte_order.read_u16(&bytes[0..2]);
+
+        // Field type (2 bytes)
+        let field_type_raw = byte_order.read_u16(&bytes[2..4]);
+        let field_type = FieldType::from_u16(field_type_raw);
+
+        // Count and value/offset depend on format
+        let (count, value_offset_bytes) = if header.is_bigtiff {
+            // BigTIFF: 8-byte count, 8-byte value/offset
+            let count = byte_order.read_u64(&bytes[4..12]);
+            let value_offset_bytes = bytes[12..20].to_vec();
+            (count, value_offset_bytes)
+        } else {
+            // Classic TIFF: 4-byte count, 4-byte value/offset
+            let count = byte_order.read_u32(&bytes[4..8]) as u64;
+            let value_offset_bytes = bytes[8..12].to_vec();
+            (count, value_offset_bytes)
+        };
+
+        // Determine if value is inline
+        let is_inline = field_type
+            .map(|ft| ft.fits_inline(count, header.is_bigtiff))
+            .unwrap_or(false);
+
+        IfdEntry {
+            tag_id,
+            field_type,
+            field_type_raw,
+            count,
+            value_offset_bytes,
+            is_inline,
+        }
+    }
+
+    /// Get the known TiffTag for this entry, if recognized.
+    pub fn tag(&self) -> Option<TiffTag> {
+        TiffTag::from_u16(self.tag_id)
+    }
+
+    /// Get the offset to the value data (for non-inline values).
+    ///
+    /// # Arguments
+    /// * `byte_order` - The byte order to use for reading
+    ///
+    /// # Returns
+    /// The offset, or 0 if the value is inline (check `is_inline` first).
+    pub fn value_offset(&self, byte_order: ByteOrder) -> u64 {
+        if self.value_offset_bytes.len() == 8 {
+            byte_order.read_u64(&self.value_offset_bytes)
+        } else {
+            byte_order.read_u32(&self.value_offset_bytes) as u64
+        }
+    }
+
+    /// Read inline value as a single u16.
+    ///
+    /// # Arguments
+    /// * `byte_order` - The byte order to use for reading
+    ///
+    /// # Returns
+    /// The value, or None if not inline or count != 1 or wrong type.
+    pub fn inline_u16(&self, byte_order: ByteOrder) -> Option<u16> {
+        if !self.is_inline || self.count != 1 {
+            return None;
+        }
+        match self.field_type? {
+            FieldType::Short => Some(byte_order.read_u16(&self.value_offset_bytes)),
+            _ => None,
+        }
+    }
+
+    /// Read inline value as a single u32.
+    ///
+    /// # Arguments
+    /// * `byte_order` - The byte order to use for reading
+    ///
+    /// # Returns
+    /// The value, or None if not inline or count != 1 or wrong type.
+    pub fn inline_u32(&self, byte_order: ByteOrder) -> Option<u32> {
+        if !self.is_inline || self.count != 1 {
+            return None;
+        }
+        match self.field_type? {
+            FieldType::Short => Some(byte_order.read_u16(&self.value_offset_bytes) as u32),
+            FieldType::Long => Some(byte_order.read_u32(&self.value_offset_bytes)),
+            _ => None,
+        }
+    }
+
+    /// Read inline value as a single u64.
+    ///
+    /// # Arguments
+    /// * `byte_order` - The byte order to use for reading
+    ///
+    /// # Returns
+    /// The value, or None if not inline or count != 1 or wrong type.
+    pub fn inline_u64(&self, byte_order: ByteOrder) -> Option<u64> {
+        if !self.is_inline || self.count != 1 {
+            return None;
+        }
+        match self.field_type? {
+            FieldType::Short => Some(byte_order.read_u16(&self.value_offset_bytes) as u64),
+            FieldType::Long => Some(byte_order.read_u32(&self.value_offset_bytes) as u64),
+            FieldType::Long8 => {
+                if self.value_offset_bytes.len() >= 8 {
+                    Some(byte_order.read_u64(&self.value_offset_bytes))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Calculate total byte size of the value data.
+    pub fn value_byte_size(&self) -> Option<u64> {
+        self.field_type
+            .map(|ft| ft.size_in_bytes() as u64 * self.count)
+    }
+}
+
+// =============================================================================
+// Ifd
+// =============================================================================
+
+/// A parsed Image File Directory (IFD).
+///
+/// An IFD contains metadata about one image in the TIFF file. WSI files typically
+/// have multiple IFDs: one for each pyramid level, plus label/macro images.
+///
+/// The entries are stored both as a vector (preserving order) and as a hashmap
+/// (for fast lookup by tag).
+#[derive(Debug, Clone)]
+pub struct Ifd {
+    /// All entries in this IFD, in file order
+    pub entries: Vec<IfdEntry>,
+
+    /// Entries indexed by tag ID for fast lookup
+    entries_by_tag: HashMap<u16, usize>,
+
+    /// Offset to the next IFD (0 if this is the last IFD)
+    pub next_ifd_offset: u64,
+}
+
+impl Ifd {
+    /// Parse an IFD from raw bytes.
+    ///
+    /// The bytes should start at the IFD offset and contain:
+    /// - Entry count (2 or 8 bytes depending on format)
+    /// - All entries (12 or 20 bytes each)
+    /// - Next IFD offset (4 or 8 bytes)
+    ///
+    /// # Arguments
+    /// * `bytes` - Raw IFD bytes
+    /// * `header` - The TIFF header
+    ///
+    /// # Errors
+    /// Returns an error if the bytes are too short for the declared entry count.
+    pub fn parse(bytes: &[u8], header: &TiffHeader) -> Result<Self, TiffError> {
+        let byte_order = header.byte_order;
+        let count_size = header.ifd_count_size();
+        let entry_size = header.ifd_entry_size();
+        let next_offset_size = header.ifd_next_offset_size();
+
+        // Read entry count
+        if bytes.len() < count_size {
+            return Err(TiffError::FileTooSmall {
+                required: count_size as u64,
+                actual: bytes.len() as u64,
+            });
+        }
+
+        let entry_count = if header.is_bigtiff {
+            byte_order.read_u64(&bytes[0..8])
+        } else {
+            byte_order.read_u16(&bytes[0..2]) as u64
+        };
+
+        // Calculate required size
+        let entries_start = count_size;
+        let entries_size = entry_count as usize * entry_size;
+        let next_offset_start = entries_start + entries_size;
+        let total_required = next_offset_start + next_offset_size;
+
+        if bytes.len() < total_required {
+            return Err(TiffError::FileTooSmall {
+                required: total_required as u64,
+                actual: bytes.len() as u64,
+            });
+        }
+
+        // Parse entries
+        let mut entries = Vec::with_capacity(entry_count as usize);
+        let mut entries_by_tag = HashMap::with_capacity(entry_count as usize);
+
+        for i in 0..entry_count as usize {
+            let entry_start = entries_start + i * entry_size;
+            let entry_bytes = &bytes[entry_start..entry_start + entry_size];
+            let entry = IfdEntry::parse(entry_bytes, header);
+
+            entries_by_tag.insert(entry.tag_id, entries.len());
+            entries.push(entry);
+        }
+
+        // Read next IFD offset
+        let next_ifd_offset = if header.is_bigtiff {
+            byte_order.read_u64(&bytes[next_offset_start..next_offset_start + 8])
+        } else {
+            byte_order.read_u32(&bytes[next_offset_start..next_offset_start + 4]) as u64
+        };
+
+        Ok(Ifd {
+            entries,
+            entries_by_tag,
+            next_ifd_offset,
+        })
+    }
+
+    /// Calculate the total size in bytes needed to read this IFD.
+    ///
+    /// This can be used to determine how many bytes to fetch before parsing.
+    /// Note: This is the size of the IFD structure itself, not including
+    /// any values stored at external offsets.
+    ///
+    /// # Arguments
+    /// * `entry_count` - Number of entries in the IFD
+    /// * `header` - The TIFF header
+    pub fn calculate_size(entry_count: u64, header: &TiffHeader) -> usize {
+        header.ifd_count_size()
+            + (entry_count as usize * header.ifd_entry_size())
+            + header.ifd_next_offset_size()
+    }
+
+    /// Get an entry by its tag ID.
+    pub fn get_entry(&self, tag_id: u16) -> Option<&IfdEntry> {
+        self.entries_by_tag
+            .get(&tag_id)
+            .map(|&idx| &self.entries[idx])
+    }
+
+    /// Get an entry by its known TiffTag.
+    pub fn get_entry_by_tag(&self, tag: TiffTag) -> Option<&IfdEntry> {
+        self.get_entry(tag.as_u16())
+    }
+
+    /// Get an inline u32 value for a tag.
+    ///
+    /// This is a convenience method for reading simple scalar values like
+    /// ImageWidth, ImageLength, TileWidth, etc.
+    pub fn get_u32(&self, tag: TiffTag, byte_order: ByteOrder) -> Option<u32> {
+        self.get_entry_by_tag(tag)?.inline_u32(byte_order)
+    }
+
+    /// Get an inline u64 value for a tag.
+    pub fn get_u64(&self, tag: TiffTag, byte_order: ByteOrder) -> Option<u64> {
+        self.get_entry_by_tag(tag)?.inline_u64(byte_order)
+    }
+
+    /// Get an inline u16 value for a tag.
+    pub fn get_u16(&self, tag: TiffTag, byte_order: ByteOrder) -> Option<u16> {
+        self.get_entry_by_tag(tag)?.inline_u16(byte_order)
+    }
+
+    /// Check if this IFD has tile organization (vs strip).
+    ///
+    /// Returns true if TileWidth and TileLength tags are present.
+    pub fn is_tiled(&self) -> bool {
+        self.get_entry_by_tag(TiffTag::TileWidth).is_some()
+            && self.get_entry_by_tag(TiffTag::TileLength).is_some()
+    }
+
+    /// Check if this IFD has strip organization.
+    ///
+    /// Returns true if StripOffsets tag is present.
+    pub fn is_stripped(&self) -> bool {
+        self.get_entry_by_tag(TiffTag::StripOffsets).is_some()
+    }
+
+    /// Get image width from this IFD.
+    pub fn image_width(&self, byte_order: ByteOrder) -> Option<u32> {
+        self.get_u32(TiffTag::ImageWidth, byte_order)
+    }
+
+    /// Get image height (length) from this IFD.
+    pub fn image_height(&self, byte_order: ByteOrder) -> Option<u32> {
+        self.get_u32(TiffTag::ImageLength, byte_order)
+    }
+
+    /// Get tile width from this IFD.
+    pub fn tile_width(&self, byte_order: ByteOrder) -> Option<u32> {
+        self.get_u32(TiffTag::TileWidth, byte_order)
+    }
+
+    /// Get tile height (length) from this IFD.
+    pub fn tile_height(&self, byte_order: ByteOrder) -> Option<u32> {
+        self.get_u32(TiffTag::TileLength, byte_order)
+    }
+
+    /// Get compression scheme from this IFD.
+    pub fn compression(&self, byte_order: ByteOrder) -> Option<u16> {
+        self.get_u16(TiffTag::Compression, byte_order)
+    }
+
+    /// Get the number of entries in this IFD.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
     }
 }
 
@@ -535,5 +905,299 @@ mod tests {
             first_ifd_offset: 16,
         };
         assert_eq!(bigtiff.value_offset_size(), 8);
+    }
+
+    // -------------------------------------------------------------------------
+    // IfdEntry Tests
+    // -------------------------------------------------------------------------
+
+    fn make_tiff_header() -> TiffHeader {
+        TiffHeader {
+            byte_order: ByteOrder::LittleEndian,
+            is_bigtiff: false,
+            first_ifd_offset: 8,
+        }
+    }
+
+    fn make_bigtiff_header() -> TiffHeader {
+        TiffHeader {
+            byte_order: ByteOrder::LittleEndian,
+            is_bigtiff: true,
+            first_ifd_offset: 16,
+        }
+    }
+
+    #[test]
+    fn test_ifd_entry_parse_tiff_inline_short() {
+        // Classic TIFF entry: ImageWidth = 1024 (SHORT type, count=1, inline)
+        // Tag 256 (0x0100), Type 3 (SHORT), Count 1, Value 1024 (0x0400)
+        let entry_bytes = [
+            0x00, 0x01, // Tag ID = 256 (ImageWidth) - little-endian
+            0x03, 0x00, // Type = 3 (SHORT)
+            0x01, 0x00, 0x00, 0x00, // Count = 1
+            0x00, 0x04, 0x00, 0x00, // Value = 1024 (inline)
+        ];
+
+        let header = make_tiff_header();
+        let entry = IfdEntry::parse(&entry_bytes, &header);
+
+        assert_eq!(entry.tag_id, 256);
+        assert_eq!(entry.tag(), Some(TiffTag::ImageWidth));
+        assert_eq!(entry.field_type, Some(FieldType::Short));
+        assert_eq!(entry.count, 1);
+        assert!(entry.is_inline);
+        assert_eq!(entry.inline_u16(header.byte_order), Some(1024));
+        assert_eq!(entry.inline_u32(header.byte_order), Some(1024));
+    }
+
+    #[test]
+    fn test_ifd_entry_parse_tiff_inline_long() {
+        // Classic TIFF entry: ImageWidth = 50000 (LONG type, count=1, inline)
+        // Tag 256 (0x0100), Type 4 (LONG), Count 1, Value 50000
+        let entry_bytes = [
+            0x00, 0x01, // Tag ID = 256 (ImageWidth)
+            0x04, 0x00, // Type = 4 (LONG)
+            0x01, 0x00, 0x00, 0x00, // Count = 1
+            0x50, 0xC3, 0x00, 0x00, // Value = 50000 (inline)
+        ];
+
+        let header = make_tiff_header();
+        let entry = IfdEntry::parse(&entry_bytes, &header);
+
+        assert_eq!(entry.tag_id, 256);
+        assert_eq!(entry.field_type, Some(FieldType::Long));
+        assert!(entry.is_inline);
+        assert_eq!(entry.inline_u32(header.byte_order), Some(50000));
+    }
+
+    #[test]
+    fn test_ifd_entry_parse_tiff_offset() {
+        // Classic TIFF entry: TileOffsets with count > 1 (stored at offset)
+        // Tag 324 (0x0144), Type 4 (LONG), Count 100, Offset 1000
+        let entry_bytes = [
+            0x44, 0x01, // Tag ID = 324 (TileOffsets)
+            0x04, 0x00, // Type = 4 (LONG)
+            0x64, 0x00, 0x00, 0x00, // Count = 100
+            0xE8, 0x03, 0x00, 0x00, // Offset = 1000
+        ];
+
+        let header = make_tiff_header();
+        let entry = IfdEntry::parse(&entry_bytes, &header);
+
+        assert_eq!(entry.tag_id, 324);
+        assert_eq!(entry.tag(), Some(TiffTag::TileOffsets));
+        assert_eq!(entry.field_type, Some(FieldType::Long));
+        assert_eq!(entry.count, 100);
+        assert!(!entry.is_inline); // Not inline because count * 4 > 4
+        assert_eq!(entry.value_offset(header.byte_order), 1000);
+        assert_eq!(entry.value_byte_size(), Some(400)); // 100 * 4 bytes
+    }
+
+    #[test]
+    fn test_ifd_entry_parse_bigtiff_inline_long8() {
+        // BigTIFF entry: ImageWidth = 100000 (LONG8 type, count=1, inline)
+        let entry_bytes = [
+            0x00, 0x01, // Tag ID = 256 (ImageWidth)
+            0x10, 0x00, // Type = 16 (LONG8)
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Count = 1
+            0xA0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Value = 100000
+        ];
+
+        let header = make_bigtiff_header();
+        let entry = IfdEntry::parse(&entry_bytes, &header);
+
+        assert_eq!(entry.tag_id, 256);
+        assert_eq!(entry.field_type, Some(FieldType::Long8));
+        assert!(entry.is_inline);
+        assert_eq!(entry.inline_u64(header.byte_order), Some(100000));
+    }
+
+    #[test]
+    fn test_ifd_entry_unknown_field_type() {
+        // Entry with unknown field type (99)
+        let entry_bytes = [
+            0x00, 0x01, // Tag ID = 256
+            0x63, 0x00, // Type = 99 (unknown)
+            0x01, 0x00, 0x00, 0x00, // Count = 1
+            0x00, 0x00, 0x00, 0x00, // Value
+        ];
+
+        let header = make_tiff_header();
+        let entry = IfdEntry::parse(&entry_bytes, &header);
+
+        assert_eq!(entry.field_type, None);
+        assert_eq!(entry.field_type_raw, 99);
+        assert!(!entry.is_inline); // Unknown types are not considered inline
+    }
+
+    // -------------------------------------------------------------------------
+    // Ifd Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_ifd_parse_tiff_simple() {
+        // Classic TIFF IFD with 3 entries:
+        // - ImageWidth = 1024
+        // - ImageLength = 768
+        // - Compression = 7 (JPEG)
+        // Next IFD offset = 500
+        let ifd_bytes = [
+            // Entry count = 3
+            0x03, 0x00,
+            // Entry 1: ImageWidth (256) = 1024
+            0x00, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
+            // Entry 2: ImageLength (257) = 768
+            0x01, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+            // Entry 3: Compression (259) = 7
+            0x03, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+            // Next IFD offset = 500
+            0xF4, 0x01, 0x00, 0x00,
+        ];
+
+        let header = make_tiff_header();
+        let ifd = Ifd::parse(&ifd_bytes, &header).unwrap();
+
+        assert_eq!(ifd.entry_count(), 3);
+        assert_eq!(ifd.next_ifd_offset, 500);
+
+        // Check values via convenience methods
+        assert_eq!(ifd.image_width(header.byte_order), Some(1024));
+        assert_eq!(ifd.image_height(header.byte_order), Some(768));
+        assert_eq!(ifd.compression(header.byte_order), Some(7));
+
+        // Check entry lookup
+        let width_entry = ifd.get_entry_by_tag(TiffTag::ImageWidth).unwrap();
+        assert_eq!(width_entry.count, 1);
+    }
+
+    #[test]
+    fn test_ifd_parse_bigtiff() {
+        // BigTIFF IFD with 2 entries
+        let ifd_bytes = [
+            // Entry count = 2 (8 bytes in BigTIFF)
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // Entry 1: ImageWidth (256) = 50000 (LONG type, count=1)
+            0x00, 0x01, // Tag
+            0x04, 0x00, // Type = LONG
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Count = 1
+            0x50, 0xC3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Value = 50000
+            // Entry 2: ImageLength (257) = 40000
+            0x01, 0x01, // Tag
+            0x04, 0x00, // Type = LONG
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Count = 1
+            0x40, 0x9C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Value = 40000
+            // Next IFD offset = 1000 (8 bytes)
+            0xE8, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let header = make_bigtiff_header();
+        let ifd = Ifd::parse(&ifd_bytes, &header).unwrap();
+
+        assert_eq!(ifd.entry_count(), 2);
+        assert_eq!(ifd.next_ifd_offset, 1000);
+        assert_eq!(ifd.image_width(header.byte_order), Some(50000));
+        assert_eq!(ifd.image_height(header.byte_order), Some(40000));
+    }
+
+    #[test]
+    fn test_ifd_parse_with_tiles() {
+        // IFD with tile-related tags
+        let ifd_bytes = [
+            // Entry count = 4
+            0x04, 0x00,
+            // ImageWidth = 10000
+            0x00, 0x01, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x10, 0x27, 0x00, 0x00,
+            // ImageLength = 8000
+            0x01, 0x01, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x40, 0x1F, 0x00, 0x00,
+            // TileWidth (322) = 256
+            0x42, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            // TileLength (323) = 256
+            0x43, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            // Next IFD = 0 (no more IFDs)
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let header = make_tiff_header();
+        let ifd = Ifd::parse(&ifd_bytes, &header).unwrap();
+
+        assert!(ifd.is_tiled());
+        assert!(!ifd.is_stripped());
+        assert_eq!(ifd.tile_width(header.byte_order), Some(256));
+        assert_eq!(ifd.tile_height(header.byte_order), Some(256));
+        assert_eq!(ifd.next_ifd_offset, 0);
+    }
+
+    #[test]
+    fn test_ifd_parse_big_endian() {
+        // Big-endian IFD with 1 entry
+        let ifd_bytes = [
+            // Entry count = 1 (big-endian)
+            0x00, 0x01,
+            // ImageWidth = 2048 (big-endian)
+            0x01, 0x00, // Tag = 256
+            0x00, 0x03, // Type = SHORT
+            0x00, 0x00, 0x00, 0x01, // Count = 1
+            0x08, 0x00, 0x00, 0x00, // Value = 2048
+            // Next IFD = 0
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let header = TiffHeader {
+            byte_order: ByteOrder::BigEndian,
+            is_bigtiff: false,
+            first_ifd_offset: 8,
+        };
+
+        let ifd = Ifd::parse(&ifd_bytes, &header).unwrap();
+
+        assert_eq!(ifd.entry_count(), 1);
+        assert_eq!(ifd.image_width(header.byte_order), Some(2048));
+    }
+
+    #[test]
+    fn test_ifd_calculate_size() {
+        let tiff_header = make_tiff_header();
+        let bigtiff_header = make_bigtiff_header();
+
+        // Classic TIFF: 2 (count) + 10*12 (entries) + 4 (next) = 126 bytes
+        assert_eq!(Ifd::calculate_size(10, &tiff_header), 126);
+
+        // BigTIFF: 8 (count) + 10*20 (entries) + 8 (next) = 216 bytes
+        assert_eq!(Ifd::calculate_size(10, &bigtiff_header), 216);
+    }
+
+    #[test]
+    fn test_ifd_parse_error_too_small() {
+        // IFD bytes too small for declared entry count
+        let ifd_bytes = [
+            0x05, 0x00, // Entry count = 5, but we only provide 2 entries worth
+            0x00, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
+            0x01, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+        ];
+
+        let header = make_tiff_header();
+        let result = Ifd::parse(&ifd_bytes, &header);
+
+        assert!(matches!(result, Err(TiffError::FileTooSmall { .. })));
+    }
+
+    #[test]
+    fn test_ifd_get_entry_not_found() {
+        // IFD with just ImageWidth
+        let ifd_bytes = [
+            0x01, 0x00,
+            0x00, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let header = make_tiff_header();
+        let ifd = Ifd::parse(&ifd_bytes, &header).unwrap();
+
+        // Should find ImageWidth
+        assert!(ifd.get_entry_by_tag(TiffTag::ImageWidth).is_some());
+
+        // Should not find ImageLength
+        assert!(ifd.get_entry_by_tag(TiffTag::ImageLength).is_none());
+        assert_eq!(ifd.image_height(header.byte_order), None);
     }
 }
