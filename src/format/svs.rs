@@ -25,11 +25,13 @@
 //! - Objective magnification
 //! - Scanner information
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::HashMap;
 
 use crate::error::TiffError;
 use crate::io::RangeReader;
+use crate::slide::SlideReader;
 
 use super::jpeg::prepare_tile_jpeg;
 use super::tiff::{PyramidLevel, TiffHeader, TiffPyramid, TiffTag, TileData, ValueReader};
@@ -344,6 +346,55 @@ impl SvsReader {
         self.pyramid
             .best_level_for_downsample(downsample)
             .map(|l| l.level_index)
+    }
+}
+
+// =============================================================================
+// SlideReader Implementation
+// =============================================================================
+
+#[async_trait]
+impl SlideReader for SvsReader {
+    fn level_count(&self) -> usize {
+        self.levels.len()
+    }
+
+    fn dimensions(&self) -> Option<(u32, u32)> {
+        self.levels.first().map(|l| (l.level.width, l.level.height))
+    }
+
+    fn level_dimensions(&self, level: usize) -> Option<(u32, u32)> {
+        self.levels.get(level).map(|l| (l.level.width, l.level.height))
+    }
+
+    fn level_downsample(&self, level: usize) -> Option<f64> {
+        self.levels.get(level).map(|l| l.level.downsample)
+    }
+
+    fn tile_size(&self, level: usize) -> Option<(u32, u32)> {
+        self.levels
+            .get(level)
+            .map(|l| (l.level.tile_width, l.level.tile_height))
+    }
+
+    fn tile_count(&self, level: usize) -> Option<(u32, u32)> {
+        self.levels
+            .get(level)
+            .map(|l| (l.level.tiles_x, l.level.tiles_y))
+    }
+
+    fn best_level_for_downsample(&self, downsample: f64) -> Option<usize> {
+        SvsReader::best_level_for_downsample(self, downsample)
+    }
+
+    async fn read_tile<R: RangeReader>(
+        &self,
+        reader: &R,
+        level: usize,
+        tile_x: u32,
+        tile_y: u32,
+    ) -> Result<Bytes, TiffError> {
+        SvsReader::read_tile(self, reader, level, tile_x, tile_y).await
     }
 }
 
