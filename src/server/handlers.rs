@@ -70,7 +70,8 @@ impl<S: SlideSource> Clone for AppState<S> {
 
 /// Path parameters for tile requests.
 ///
-/// Extracted from: `/tiles/{slide_id}/{level}/{x}/{y}.jpg`
+/// Extracted from: `/tiles/{slide_id}/{level}/{x}/{filename}`
+/// where filename is `{y}` or `{y}.jpg`
 #[derive(Debug, Deserialize)]
 pub struct TilePathParams {
     /// Slide identifier (can be a path like "bucket/folder/slide.svs")
@@ -82,8 +83,16 @@ pub struct TilePathParams {
     /// Tile X coordinate (0-indexed from left)
     pub x: u32,
 
-    /// Tile Y coordinate (0-indexed from top)
-    pub y: u32,
+    /// Tile Y coordinate with optional .jpg extension (e.g., "0" or "0.jpg")
+    pub filename: String,
+}
+
+impl TilePathParams {
+    /// Parse the Y coordinate from the filename, stripping any .jpg extension.
+    pub fn y(&self) -> Result<u32, std::num::ParseIntError> {
+        let y_str = self.filename.strip_suffix(".jpg").unwrap_or(&self.filename);
+        y_str.parse()
+    }
 }
 
 /// Query parameters for tile requests.
@@ -446,12 +455,23 @@ pub async fn tile_handler<S: SlideSource>(
     Path(params): Path<TilePathParams>,
     Query(query): Query<TileQueryParams>,
 ) -> Result<Response, HandlerError> {
+    // Parse Y coordinate from filename (handles both "0" and "0.jpg")
+    let y = params.y().map_err(|_| {
+        HandlerError(TileError::TileOutOfBounds {
+            level: params.level,
+            x: params.x,
+            y: 0,
+            max_x: 0,
+            max_y: 0,
+        })
+    })?;
+
     // Build tile request
     let request = TileRequest::with_quality(
         &params.slide_id,
         params.level,
         params.x,
-        params.y,
+        y,
         query.quality,
     );
 

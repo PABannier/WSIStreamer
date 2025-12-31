@@ -195,22 +195,27 @@ where
     S: SlideSource + 'static,
 {
     // Protected tile routes (require authentication)
+    // Uses {filename} to capture both "{y}" and "{y}.jpg" formats
+    // Auth middleware is applied to the nested router AFTER nesting so it sees the full /tiles/... path
     let tile_routes = Router::new()
-        .route("/{slide_id}/{level}/{x}/{y}.jpg", get(tile_handler::<S>))
-        .route("/{slide_id}/{level}/{x}/{y}", get(tile_handler::<S>))
+        .route("/{slide_id}/{level}/{x}/{filename}", get(tile_handler::<S>))
+        .with_state(app_state.clone());
+
+    // Create nested tiles router with auth applied AFTER nesting
+    let protected_tiles = Router::new()
+        .nest("/tiles", tile_routes)
         .layer(middleware::from_fn_with_state(
             auth,
             super::auth::auth_middleware,
-        ))
-        .with_state(app_state.clone());
+        ));
 
-    // Public routes
+    // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/health", get(health_handler));
 
     // Combine routes
     Router::new()
-        .nest("/tiles", tile_routes)
+        .merge(protected_tiles)
         .merge(public_routes)
         .layer(cors)
 }
@@ -221,14 +226,11 @@ where
     S: SlideSource + 'static,
 {
     // All routes are public
+    // Uses {filename} to capture both "{y}" and "{y}.jpg" formats
     Router::new()
         .route("/health", get(health_handler))
         .route(
-            "/tiles/{slide_id}/{level}/{x}/{y}.jpg",
-            get(tile_handler::<S>),
-        )
-        .route(
-            "/tiles/{slide_id}/{level}/{x}/{y}",
+            "/tiles/{slide_id}/{level}/{x}/{filename}",
             get(tile_handler::<S>),
         )
         .with_state(app_state)
