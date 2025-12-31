@@ -1,0 +1,137 @@
+# ==============================================================================
+# WSI Streamer - Local Development Environment
+# ==============================================================================
+#
+# This docker-compose file sets up a complete local development environment
+# with MinIO as an S3-compatible object storage backend.
+#
+# Usage:
+#   # Start all services
+#   docker-compose up -d
+#
+#   # View logs
+#   docker-compose logs -f wsi-streamer
+#
+#   # Stop all services
+#   docker-compose down
+#
+#   # Rebuild after code changes
+#   docker-compose up -d --build
+#
+# Services:
+#   - wsi-streamer: The tile server (http://localhost:3000)
+#   - minio: S3-compatible storage (http://localhost:9000)
+#   - minio-console: MinIO web console (http://localhost:9001)
+#   - createbuckets: One-time setup to create the slides bucket
+#
+# Uploading slides:
+#   # Using MinIO client (mc)
+#   mc alias set local http://localhost:9000 minioadmin minioadmin
+#   mc cp /path/to/slide.svs local/slides/
+#
+#   # Or use the MinIO console at http://localhost:9001
+#   # Login: minioadmin / minioadmin
+#
+# Accessing tiles:
+#   # Health check
+#   curl http://localhost:3000/health
+#
+#   # Get a tile (auth disabled in dev mode)
+#   curl http://localhost:3000/tiles/slide.svs/0/0/0.jpg -o tile.jpg
+#
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # WSI Streamer - Tile Server
+  # ----------------------------------------------------------------------------
+  wsi-streamer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Server configuration
+      WSI_HOST: "0.0.0.0"
+      WSI_PORT: "3000"
+
+      # S3 configuration (pointing to MinIO)
+      WSI_S3_BUCKET: "slides"
+      WSI_S3_ENDPOINT: "http://minio:9000"
+      WSI_S3_REGION: "us-east-1"
+
+      # Disable authentication for local development
+      WSI_AUTH_ENABLED: "false"
+
+      # Cache configuration
+      WSI_CACHE_SLIDES: "50"
+      WSI_CACHE_BLOCKS: "100"
+      WSI_CACHE_TILES: "1000"
+
+      # JPEG quality
+      WSI_JPEG_QUALITY: "80"
+
+      # AWS credentials for MinIO
+      AWS_ACCESS_KEY_ID: "minioadmin"
+      AWS_SECRET_ACCESS_KEY: "minioadmin"
+      AWS_REGION: "us-east-1"
+
+    depends_on:
+      minio:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # MinIO - S3-Compatible Object Storage
+  # ----------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Bucket Creator - One-time setup
+  # ----------------------------------------------------------------------------
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb local/slides --ignore-existing;
+      mc anonymous set download local/slides;
+      echo 'Bucket created successfully';
+      exit 0;
+      "
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  minio-data:
+    driver: local

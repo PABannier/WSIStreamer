@@ -1,0 +1,45 @@
+# Build artifacts
+target/
+debug/
+release/
+
+# Git
+.git/
+.gitignore
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+
+# Docker files (avoid recursive builds)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Test files and fixtures
+tests/
+test_data/
+*.test
+
+# Local configuration
+.env
+.env.*
+*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rust specific
+**/*.rs.bk
+Cargo.lock.bak
+
+# Note: Cargo.lock is intentionally NOT ignored
+# It's needed for reproducible builds
