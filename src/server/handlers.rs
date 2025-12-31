@@ -16,8 +16,9 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, warn};
 
-use crate::error::{IoError, TiffError, TileError};
+use crate::error::{FormatError, IoError, TiffError, TileError};
 use crate::slide::SlideSource;
 use crate::tile::{TileRequest, TileService, DEFAULT_JPEG_QUALITY};
 
@@ -162,6 +163,10 @@ pub struct HealthResponse {
 // =============================================================================
 
 /// Convert TileError to HTTP response.
+///
+/// This implementation logs errors appropriately based on their severity:
+/// - 4xx errors are logged at WARN level (client errors)
+/// - 5xx errors are logged at ERROR level (server errors)
 impl IntoResponse for TileError {
     fn into_response(self) -> Response {
         let (status, error_type, message) = match &self {
@@ -258,6 +263,126 @@ impl IntoResponse for TileError {
                 format!("Slide processing error: {}", tiff_err),
             ),
         };
+
+        // Log errors based on severity
+        if status.is_server_error() {
+            error!(
+                error_type = error_type,
+                status = status.as_u16(),
+                "Server error: {}",
+                message
+            );
+        } else if status.is_client_error() {
+            // Log 404s at debug level (common and expected), others at warn
+            if status == StatusCode::NOT_FOUND {
+                debug!(
+                    error_type = error_type,
+                    status = status.as_u16(),
+                    "Resource not found: {}",
+                    message
+                );
+            } else {
+                warn!(
+                    error_type = error_type,
+                    status = status.as_u16(),
+                    "Client error: {}",
+                    message
+                );
+            }
+        }
+
+        let error_response = ErrorResponse::with_status(error_type, message, status);
+
+        (status, Json(error_response)).into_response()
+    }
+}
+
+/// Convert FormatError to HTTP response.
+///
+/// FormatError typically indicates an unsupported file format (HTTP 415)
+/// or an I/O error during format detection.
+impl IntoResponse for FormatError {
+    fn into_response(self) -> Response {
+        let (status, error_type, message) = match &self {
+            FormatError::Io(io_err) => match io_err {
+                IoError::NotFound(path) => (
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    format!("Slide not found: {}", path),
+                ),
+                IoError::S3(msg) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "storage_error",
+                    format!("Storage error: {}", msg),
+                ),
+                IoError::Connection(msg) => (
+                    StatusCode::BAD_GATEWAY,
+                    "connection_error",
+                    format!("Connection error: {}", msg),
+                ),
+                IoError::RangeOutOfBounds { .. } => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "io_error",
+                    format!("I/O error: {}", io_err),
+                ),
+            },
+
+            FormatError::Tiff(tiff_err) => match tiff_err {
+                TiffError::UnsupportedCompression(compression) => (
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_format",
+                    format!(
+                        "Unsupported compression: {} (only JPEG is supported)",
+                        compression
+                    ),
+                ),
+                TiffError::StripOrganization => (
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_format",
+                    "Unsupported organization: file uses strips instead of tiles".to_string(),
+                ),
+                TiffError::InvalidMagic(_) | TiffError::InvalidVersion(_) => (
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_format",
+                    format!("Unsupported file format: {}", tiff_err),
+                ),
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "slide_error",
+                    format!("Slide processing error: {}", tiff_err),
+                ),
+            },
+
+            FormatError::UnsupportedFormat { reason } => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_format",
+                format!("Unsupported format: {}", reason),
+            ),
+        };
+
+        // Log errors based on severity
+        if status.is_server_error() {
+            error!(
+                error_type = error_type,
+                status = status.as_u16(),
+                "Server error: {}",
+                message
+            );
+        } else if status == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            warn!(
+                error_type = error_type,
+                status = status.as_u16(),
+                "Unsupported format: {}",
+                message
+            );
+        } else if status == StatusCode::NOT_FOUND {
+            debug!(
+                error_type = error_type,
+                status = status.as_u16(),
+                "Resource not found: {}",
+                message
+            );
+        }
 
         let error_response = ErrorResponse::with_status(error_type, message, status);
 
@@ -470,5 +595,73 @@ mod tests {
         assert_eq!(params.quality, 95);
         assert_eq!(params.sig, Some("abc123".to_string()));
         assert_eq!(params.exp, Some(1234567890));
+    }
+
+    #[test]
+    fn test_format_error_to_status_code() {
+        // Test IoError::NotFound -> 404
+        let err = FormatError::Io(IoError::NotFound("test.svs".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Test IoError::S3 -> 500
+        let err = FormatError::Io(IoError::S3("connection refused".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Test IoError::Connection -> 502
+        let err = FormatError::Io(IoError::Connection("timeout".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+        // Test UnsupportedCompression -> 415
+        let err = FormatError::Tiff(TiffError::UnsupportedCompression("LZW".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // Test StripOrganization -> 415
+        let err = FormatError::Tiff(TiffError::StripOrganization);
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // Test InvalidMagic -> 415
+        let err = FormatError::Tiff(TiffError::InvalidMagic(0x1234));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // Test InvalidVersion -> 415
+        let err = FormatError::Tiff(TiffError::InvalidVersion(99));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // Test UnsupportedFormat -> 415
+        let err = FormatError::UnsupportedFormat {
+            reason: "not a TIFF file".to_string(),
+        };
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // Test other TiffError -> 500
+        let err = FormatError::Tiff(TiffError::MissingTag("TileOffsets"));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_io_error_in_tile_error() {
+        // Test NotFound via I/O -> 404
+        let err = TileError::Io(IoError::NotFound("s3://bucket/slide.svs".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Test S3 error -> 500
+        let err = TileError::Io(IoError::S3("access denied".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Test Connection error -> 500
+        let err = TileError::Io(IoError::Connection("reset by peer".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

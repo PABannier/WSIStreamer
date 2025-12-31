@@ -53,6 +53,7 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+use tracing::{debug, warn};
 
 use super::handlers::ErrorResponse;
 
@@ -133,6 +134,36 @@ impl IntoResponse for AuthError {
                 self.to_string(),
             ),
         };
+
+        // Log authentication errors
+        // Invalid signature could indicate an attack, so log at warn level
+        // Expired signatures are common and expected, log at debug
+        match &self {
+            AuthError::InvalidSignature => {
+                warn!(
+                    error_type = error_type,
+                    status = status.as_u16(),
+                    "Authentication failed: {}",
+                    message
+                );
+            }
+            AuthError::Expired { .. } => {
+                debug!(
+                    error_type = error_type,
+                    status = status.as_u16(),
+                    "Authentication failed: {}",
+                    message
+                );
+            }
+            _ => {
+                debug!(
+                    error_type = error_type,
+                    status = status.as_u16(),
+                    "Authentication failed: {}",
+                    message
+                );
+            }
+        }
 
         let error_response = ErrorResponse::with_status(error_type, message, status);
         (status, Json(error_response)).into_response()
