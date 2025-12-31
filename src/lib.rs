@@ -34,4 +34,5 @@ pub use tile::{
 pub use server::{
     AppState, ErrorResponse, HealthResponse, TilePathParams, TileQueryParams,
     health_handler, tile_handler,
+    AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth, auth_middleware,
 };
