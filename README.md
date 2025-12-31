@@ -206,7 +206,7 @@ This is the most common cause of "tile decoding fails" bugs and must be treated 
 
 **The problem**: Aperio SVS files use "abbreviated JPEG streams" to save space. Each tile's JPEG data is incomplete—it lacks the quantization and Huffman tables needed for decoding. These tables are stored once in a `JPEGTables` TIFF tag and must be merged with each tile's data before decoding.
 
-**The merge is non-trivial**: 
+**The merge is non-trivial**:
 - The `JPEGTables` blob starts with `FFD8` (SOI) and ends with `FFD9` (EOI)
 - Each tile's data also starts with `FFD8` and ends with `FFD9`
 - To merge: strip the trailing `FFD9` from tables, strip the leading `FFD8` from tile, concatenate
@@ -360,7 +360,7 @@ Parse Image File Directories (this is where byte order and format differences co
 - Calculate total IFD size and read all entries in one range request
 - Parse each entry respecting byte order throughout:
   - Tag ID (2 bytes)
-  - Field type (2 bytes)  
+  - Field type (2 bytes)
   - Count (4 bytes for TIFF, 8 bytes for BigTIFF)
   - Value/offset field (4 bytes for TIFF, 8 bytes for BigTIFF)
 - Determine if value is inline or at offset:
@@ -375,7 +375,7 @@ Parse Image File Directories (this is where byte order and format differences co
 Read tag values from IFD entries:
 - For inline values: extract from the value field bytes, respecting byte order
 - For offset values: issue range read to fetch data, respecting byte order
-- For array values (TileOffsets, TileByteCounts): 
+- For array values (TileOffsets, TileByteCounts):
   - Calculate total array size
   - Fetch entire array in single range request (critical for performance)
   - Parse all elements respecting byte order
@@ -590,7 +590,7 @@ Verify end-to-end functionality with focus on critical areas:
 
 **TIFF parser edge cases**:
 - Test with little-endian TIFF
-- Test with big-endian TIFF  
+- Test with big-endian TIFF
 - Test with BigTIFF (>4GB offset values)
 - Verify label/macro images are excluded from pyramid
 

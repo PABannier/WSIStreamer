@@ -16,8 +16,10 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
+pub mod auth;
 pub mod handlers;
 
+pub use auth::{AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth, auth_middleware};
 pub use handlers::{
     health_handler, tile_handler, AppState, ErrorResponse, HealthResponse, TilePathParams,
     TileQueryParams,
