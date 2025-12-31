@@ -35,4 +35,5 @@ pub use server::{
     AppState, ErrorResponse, HealthResponse, TilePathParams, TileQueryParams,
     health_handler, tile_handler,
     AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth, auth_middleware,
+    RouterConfig, create_router, create_dev_router, create_production_router,
 };
