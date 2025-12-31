@@ -26,3 +26,7 @@ hmac = "0.12"
 sha2 = "0.10"
 subtle = "2"
 hex = "0.4"
+
+# CLI and logging
+clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

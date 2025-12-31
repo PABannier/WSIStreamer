@@ -549,7 +549,7 @@ Make the service configurable and robust.
 
 Support flexible configuration:
 - Define configuration structure (server, S3, cache, auth, tile defaults)
-- Load from environment variables
+- Create a CLI to launch and configure the server (the entrypoint is `main.rs`)
 - Validate configuration at startup
 - Provide sensible defaults
 

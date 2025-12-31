@@ -3,6 +3,7 @@
 //! This library provides the core functionality for serving tiles from
 //! Whole Slide Images stored in cloud object storage using HTTP range requests.
 
+pub mod config;
 pub mod error;
 pub mod format;
 pub mod io;
@@ -11,6 +12,7 @@ pub mod slide;
 pub mod tile;
 
 // Re-export commonly used types
+pub use config::Config;
 pub use error::{FormatError, IoError, TiffError, TileError};
 pub use format::tiff::{
     ByteOrder, Compression, FieldType, Ifd, IfdEntry, PyramidLevel, TiffHeader, TiffPyramid,
@@ -25,7 +27,7 @@ pub use format::{
     is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
-pub use slide::{CachedSlide, LevelInfo, SlideReader, SlideRegistry, SlideSource};
+pub use slide::{CachedSlide, LevelInfo, S3SlideSource, SlideReader, SlideRegistry, SlideSource};
 pub use tile::{
     JpegTileEncoder, TileCache, TileCacheKey, TileRequest, TileResponse, TileService,
     DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
