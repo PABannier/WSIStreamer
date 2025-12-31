@@ -36,18 +36,12 @@
 //! # Usage
 //!
 //! ```ignore
-//! use wsi_streamer::slide::{SlideRegistry, SlideSource};
-//! use wsi_streamer::io::RangeReader;
+//! use wsi_streamer::slide::{SlideRegistry, S3SlideSource};
+//! use wsi_streamer::io::create_s3_client;
 //!
-//! // Create a source that can open slides
-//! struct MySlideSource { /* ... */ }
-//!
-//! impl SlideSource for MySlideSource {
-//!     type Reader = MyReader;
-//!     async fn create_reader(&self, slide_id: &str) -> Result<Self::Reader, IoError> {
-//!         // Create a reader for the given slide ID
-//!     }
-//! }
+//! // Create S3 client and source
+//! let client = create_s3_client(None).await;
+//! let source = S3SlideSource::new(client, "my-bucket".to_string());
 //!
 //! // Create registry
 //! let registry = SlideRegistry::new(source);
@@ -61,6 +55,8 @@
 
 mod reader;
 mod registry;
+mod s3_source;
 
 pub use reader::{LevelInfo, SlideReader};
 pub use registry::{CachedSlide, SlideRegistry, SlideSource};
+pub use s3_source::S3SlideSource;
