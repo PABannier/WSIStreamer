@@ -606,7 +606,6 @@ Verify end-to-end functionality with focus on critical areas:
 
 **Test with real services**:
 - Test with MinIO (local development)
-- Test with real S3 (if credentials available)
 
 ---
 
