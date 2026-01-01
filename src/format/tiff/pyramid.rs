@@ -117,8 +117,8 @@ impl PyramidLevel {
         let width = ifd.image_width(byte_order)?;
         let height = ifd.image_height(byte_order)?;
 
-        // Get compression (default to JPEG if not specified)
-        let compression = ifd.compression(byte_order).unwrap_or(7);
+        // Get compression (0 indicates missing)
+        let compression = ifd.compression(byte_order).unwrap_or(0);
 
         // Calculate tile counts
         let tiles_x = (width + tile_width - 1) / tile_width;

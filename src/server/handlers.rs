@@ -305,7 +305,6 @@ impl IntoResponse for TileError {
                 "encode_error",
                 format!("Failed to encode tile: {}", message),
             ),
-
         };
 
         // Log errors based on severity

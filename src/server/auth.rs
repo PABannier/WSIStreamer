@@ -189,7 +189,7 @@ impl IntoResponse for AuthError {
 /// Signed URL authenticator using HMAC-SHA256.
 ///
 /// This struct provides methods for generating and verifying signed URLs.
-    /// The signing scheme binds signatures to paths, query params, and expiry times.
+/// The signing scheme binds signatures to paths, query params, and expiry times.
 #[derive(Clone)]
 pub struct SignedUrlAuth {
     /// Secret key for HMAC computation
