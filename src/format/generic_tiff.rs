@@ -7,7 +7,7 @@
 //!
 //! This reader supports TIFF files that:
 //! - Use tiled organization (not strips)
-//! - Use JPEG compression (compression tag = 7)
+//! - Use JPEG or JPEG 2000 compression (compression tag = 7 or 33003)
 //! - Have multiple resolution levels (pyramid structure)
 //!
 //! # Unsupported Files
@@ -15,7 +15,7 @@
 //! Files that don't meet these requirements return an error that can be
 //! mapped to HTTP 415 Unsupported Media Type:
 //! - Strip-based TIFFs
-//! - Non-JPEG compression (LZW, Deflate, JPEG2000, etc.)
+//! - Non-JPEG/JPEG 2000 compression (LZW, Deflate, etc.)
 //! - Single-level TIFFs without pyramid structure
 
 use async_trait::async_trait;

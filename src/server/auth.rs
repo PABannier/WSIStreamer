@@ -4,13 +4,15 @@
 //!
 //! # URL Signing Scheme
 //!
-//! URLs are signed by computing an HMAC-SHA256 over the path and expiry timestamp:
+//! URLs are signed by computing an HMAC-SHA256 over the path and query parameters
+//! (excluding `sig`). This binds signatures to the full request path and query:
 //!
 //! ```text
-//! signature = HMAC-SHA256(secret_key, "{path}:{expiry}")
+//! signature = HMAC-SHA256(secret_key, "{path}?{canonical_query}")
 //! ```
 //!
-//! The signature and expiry are appended as query parameters:
+//! The query string must include `exp` and may include extra parameters like
+//! `quality`. The `sig` parameter is excluded from the canonical query.
 //!
 //! ```text
 //! /tiles/slides/sample.svs/0/1/2.jpg?quality=80&exp=1735689600&sig=abc123...
@@ -18,7 +20,7 @@
 //!
 //! # Security Properties
 //!
-//! - **Path binding**: Signatures are bound to specific paths, preventing URL tampering
+//! - **Path + query binding**: Signatures are bound to paths and query params, preventing tampering
 //! - **Time-limited**: Signatures expire after a configurable TTL
 //! - **Constant-time comparison**: Signature verification uses constant-time comparison
 //!   to prevent timing attacks
@@ -37,13 +39,13 @@
 //! let (signature, expiry) = auth.sign(path, Duration::from_secs(3600));
 //!
 //! // Verify the signature
-//! assert!(auth.verify(path, &signature, expiry).is_ok());
+//! assert!(auth.verify(path, &signature, expiry, &[]).is_ok());
 //! ```
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{
-    extract::{FromRequestParts, Query, Request},
+    extract::{FromRequestParts, OriginalUri, Request},
     http::{request::Parts, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -54,6 +56,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
+use url::form_urlencoded;
 
 use super::handlers::ErrorResponse;
 
@@ -86,6 +89,9 @@ pub enum AuthError {
 
     /// Signature format is invalid (not valid hex)
     InvalidSignatureFormat,
+
+    /// Expiry timestamp is not a valid integer
+    InvalidExpiryFormat,
 }
 
 impl std::fmt::Display for AuthError {
@@ -103,6 +109,7 @@ impl std::fmt::Display for AuthError {
             ),
             AuthError::InvalidSignature => write!(f, "Invalid signature"),
             AuthError::InvalidSignatureFormat => write!(f, "Invalid signature format"),
+            AuthError::InvalidExpiryFormat => write!(f, "Invalid expiry format"),
         }
     }
 }
@@ -131,6 +138,11 @@ impl IntoResponse for AuthError {
             AuthError::InvalidSignatureFormat => (
                 StatusCode::BAD_REQUEST,
                 "invalid_signature_format",
+                self.to_string(),
+            ),
+            AuthError::InvalidExpiryFormat => (
+                StatusCode::BAD_REQUEST,
+                "invalid_expiry_format",
                 self.to_string(),
             ),
         };
@@ -177,7 +189,7 @@ impl IntoResponse for AuthError {
 /// Signed URL authenticator using HMAC-SHA256.
 ///
 /// This struct provides methods for generating and verifying signed URLs.
-/// The signing scheme binds signatures to specific paths and expiry times.
+    /// The signing scheme binds signatures to paths, query params, and expiry times.
 #[derive(Clone)]
 pub struct SignedUrlAuth {
     /// Secret key for HMAC computation
@@ -210,13 +222,25 @@ impl SignedUrlAuth {
     ///
     /// A tuple of (signature, expiry_timestamp)
     pub fn sign(&self, path: &str, ttl: Duration) -> (String, u64) {
+        self.sign_with_params(path, ttl, &[])
+    }
+
+    /// Sign a path with extra query parameters.
+    ///
+    /// `params` should exclude `exp` and `sig`; those are added automatically.
+    pub fn sign_with_params(
+        &self,
+        path: &str,
+        ttl: Duration,
+        params: &[(&str, &str)],
+    ) -> (String, u64) {
         let expiry = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
             + ttl.as_secs();
 
-        let signature = self.compute_signature(path, expiry);
+        let signature = self.compute_signature(path, expiry, params);
         (signature, expiry)
     }
 
@@ -233,7 +257,19 @@ impl SignedUrlAuth {
     ///
     /// The hex-encoded signature
     pub fn sign_with_expiry(&self, path: &str, expiry: u64) -> String {
-        self.compute_signature(path, expiry)
+        self.sign_with_expiry_and_params(path, expiry, &[])
+    }
+
+    /// Sign a path with a specific expiry timestamp and extra parameters.
+    ///
+    /// `params` should exclude `exp` and `sig`; those are added automatically.
+    pub fn sign_with_expiry_and_params(
+        &self,
+        path: &str,
+        expiry: u64,
+        params: &[(&str, &str)],
+    ) -> String {
+        self.compute_signature(path, expiry, params)
     }
 
     /// Verify a signature for a path and expiry.
@@ -247,7 +283,13 @@ impl SignedUrlAuth {
     /// # Returns
     ///
     /// `Ok(())` if the signature is valid and not expired, `Err(AuthError)` otherwise.
-    pub fn verify(&self, path: &str, signature: &str, expiry: u64) -> Result<(), AuthError> {
+    pub fn verify(
+        &self,
+        path: &str,
+        signature: &str,
+        expiry: u64,
+        params: &[(&str, &str)],
+    ) -> Result<(), AuthError> {
         // Check expiry first
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -265,7 +307,7 @@ impl SignedUrlAuth {
         let provided_sig = hex::decode(signature).map_err(|_| AuthError::InvalidSignatureFormat)?;
 
         // Compute expected signature
-        let expected_sig_hex = self.compute_signature(path, expiry);
+        let expected_sig_hex = self.compute_signature(path, expiry, params);
         let expected_sig =
             hex::decode(&expected_sig_hex).map_err(|_| AuthError::InvalidSignatureFormat)?;
 
@@ -278,9 +320,8 @@ impl SignedUrlAuth {
     }
 
     /// Compute the HMAC-SHA256 signature for a path and expiry.
-    fn compute_signature(&self, path: &str, expiry: u64) -> String {
-        // Create the message to sign: "{path}:{expiry}"
-        let message = format!("{}:{}", path, expiry);
+    fn compute_signature(&self, path: &str, expiry: u64, params: &[(&str, &str)]) -> String {
+        let message = signature_base(path, expiry, params);
 
         // Compute HMAC-SHA256
         let mut mac =
@@ -311,23 +352,47 @@ impl SignedUrlAuth {
         ttl: Duration,
         extra_params: &[(&str, &str)],
     ) -> String {
-        let (signature, expiry) = self.sign(path, ttl);
+        let (signature, expiry) = self.sign_with_params(path, ttl, extra_params);
 
         let mut url = format!("{}{}", base_url, path);
 
-        // Build query string
-        let mut params: Vec<String> = extra_params
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect();
-        params.push(format!("exp={}", expiry));
-        params.push(format!("sig={}", signature));
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        for (key, value) in extra_params {
+            serializer.append_pair(key, value);
+        }
+        serializer.append_pair("exp", &expiry.to_string());
+        serializer.append_pair("sig", &signature);
 
         url.push('?');
-        url.push_str(&params.join("&"));
+        url.push_str(&serializer.finish());
 
         url
     }
+}
+
+fn signature_base(path: &str, expiry: u64, params: &[(&str, &str)]) -> String {
+    let mut all_params: Vec<(String, String)> = Vec::with_capacity(params.len() + 1);
+    for (key, value) in params {
+        all_params.push(((*key).to_string(), (*value).to_string()));
+    }
+    all_params.push(("exp".to_string(), expiry.to_string()));
+
+    let canonical = canonical_query(&all_params);
+    if canonical.is_empty() {
+        path.to_string()
+    } else {
+        format!("{}?{}", path, canonical)
+    }
+}
+
+fn canonical_query(params: &[(String, String)]) -> String {
+    let mut pairs = params.to_vec();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    pairs
+        .into_iter()
+        .map(|(key, value)| format!("{}={}", key, value))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 // =============================================================================
@@ -367,19 +432,49 @@ pub struct AuthQueryParams {
 /// ```
 pub async fn auth_middleware(
     axum::extract::State(auth): axum::extract::State<SignedUrlAuth>,
-    Query(params): Query<AuthQueryParams>,
+    OriginalUri(original_uri): OriginalUri,
     request: Request,
     next: Next,
 ) -> Result<Response, AuthError> {
-    // Extract signature and expiry
-    let signature = params.sig.ok_or(AuthError::MissingSignature)?;
-    let expiry = params.exp.ok_or(AuthError::MissingExpiry)?;
+    let query = original_uri.query().unwrap_or("");
+    let mut signature: Option<String> = None;
+    let mut expiry: Option<u64> = None;
+    let mut extra_params: Vec<(String, String)> = Vec::new();
+
+    for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+        if key == "sig" {
+            if signature.is_some() {
+                return Err(AuthError::InvalidSignatureFormat);
+            }
+            signature = Some(value.into_owned());
+            continue;
+        }
+        if key == "exp" {
+            if expiry.is_some() {
+                return Err(AuthError::InvalidExpiryFormat);
+            }
+            let parsed = value
+                .parse::<u64>()
+                .map_err(|_| AuthError::InvalidExpiryFormat)?;
+            expiry = Some(parsed);
+            continue;
+        }
+
+        extra_params.push((key.into_owned(), value.into_owned()));
+    }
+
+    let signature = signature.ok_or(AuthError::MissingSignature)?;
+    let expiry = expiry.ok_or(AuthError::MissingExpiry)?;
 
     // Get the path from the request
-    let path = request.uri().path();
+    let path = original_uri.path();
 
     // Verify signature
-    auth.verify(path, &signature, expiry)?;
+    let extra_params_ref: Vec<(&str, &str)> = extra_params
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    auth.verify(path, &signature, expiry, &extra_params_ref)?;
 
     // Continue to the handler
     Ok(next.run(request).await)
@@ -432,7 +527,7 @@ mod tests {
         let (signature, expiry) = auth.sign(path, ttl);
 
         // Signature should be valid
-        assert!(auth.verify(path, &signature, expiry).is_ok());
+        assert!(auth.verify(path, &signature, expiry, &[]).is_ok());
     }
 
     #[test]
@@ -445,7 +540,7 @@ mod tests {
 
         // Wrong signature should fail
         let wrong_sig = "0".repeat(64); // Valid hex but wrong signature
-        let result = auth.verify(path, &wrong_sig, expiry);
+        let result = auth.verify(path, &wrong_sig, expiry, &[]);
         assert!(matches!(result, Err(AuthError::InvalidSignature)));
     }
 
@@ -459,7 +554,7 @@ mod tests {
 
         // Different path should fail
         let wrong_path = "/tiles/slides/other.svs/0/1/2.jpg";
-        let result = auth.verify(wrong_path, &signature, expiry);
+        let result = auth.verify(wrong_path, &signature, expiry, &[]);
         assert!(matches!(result, Err(AuthError::InvalidSignature)));
     }
 
@@ -477,7 +572,7 @@ mod tests {
 
         let signature = auth.sign_with_expiry(path, expired_time);
 
-        let result = auth.verify(path, &signature, expired_time);
+        let result = auth.verify(path, &signature, expired_time, &[]);
         assert!(matches!(result, Err(AuthError::Expired { .. })));
     }
 
@@ -492,7 +587,7 @@ mod tests {
             + 3600;
 
         // Invalid hex should fail
-        let result = auth.verify(path, "not-valid-hex!", expiry);
+        let result = auth.verify(path, "not-valid-hex!", expiry, &[]);
         assert!(matches!(result, Err(AuthError::InvalidSignatureFormat)));
     }
 
@@ -510,10 +605,10 @@ mod tests {
         assert_ne!(sig1, sig2);
 
         // Each should only verify with its own key
-        assert!(auth1.verify(path, &sig1, expiry).is_ok());
-        assert!(auth1.verify(path, &sig2, expiry).is_err());
-        assert!(auth2.verify(path, &sig2, expiry).is_ok());
-        assert!(auth2.verify(path, &sig1, expiry).is_err());
+        assert!(auth1.verify(path, &sig1, expiry, &[]).is_ok());
+        assert!(auth1.verify(path, &sig2, expiry, &[]).is_err());
+        assert!(auth2.verify(path, &sig2, expiry, &[]).is_ok());
+        assert!(auth2.verify(path, &sig1, expiry, &[]).is_err());
     }
 
     #[test]
@@ -565,6 +660,9 @@ mod tests {
 
         let err = AuthError::InvalidSignatureFormat;
         assert_eq!(err.to_string(), "Invalid signature format");
+
+        let err = AuthError::InvalidExpiryFormat;
+        assert_eq!(err.to_string(), "Invalid expiry format");
     }
 
     #[test]
@@ -594,8 +692,8 @@ mod tests {
         wrong_last.replace_range(last..last + 1, "0");
 
         // All should fail (we can't easily test timing, but we verify correctness)
-        assert!(auth.verify(path, &wrong_first, expiry).is_err());
-        assert!(auth.verify(path, &wrong_middle, expiry).is_err());
-        assert!(auth.verify(path, &wrong_last, expiry).is_err());
+        assert!(auth.verify(path, &wrong_first, expiry, &[]).is_err());
+        assert!(auth.verify(path, &wrong_middle, expiry, &[]).is_err());
+        assert!(auth.verify(path, &wrong_last, expiry, &[]).is_err());
     }
 }

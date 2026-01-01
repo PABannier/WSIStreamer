@@ -8,7 +8,7 @@
 //!
 //! The following constraints define what slides are supported:
 //! - **Organization**: Tiled only (no strips)
-//! - **Compression**: JPEG only (no LZW, Deflate, JPEG2000)
+//! - **Compression**: JPEG or JPEG 2000 (no LZW, Deflate)
 //! - **Format**: Standard TIFF or BigTIFF
 //! - **Structure**: Must have tile offsets and byte counts tags
 //!
@@ -340,7 +340,7 @@ pub fn validate_pyramid(pyramid: &TiffPyramid) -> ValidationResult {
 
 /// Check if an IFD uses supported compression.
 ///
-/// Returns Ok(()) if compression is JPEG, or an error otherwise.
+/// Returns Ok(()) if compression is JPEG or JPEG 2000, or an error otherwise.
 pub fn check_compression(ifd: &Ifd, byte_order: ByteOrder) -> Result<(), TiffError> {
     if let Some(compression_value) = ifd.compression(byte_order) {
         if let Some(compression) = Compression::from_u16(compression_value) {

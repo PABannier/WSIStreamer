@@ -43,8 +43,8 @@ The project implements native Rust parsers for a focused subset of WSI formats, 
 
 ### Format Support
 
-- **Aperio SVS**: TIFF-based, JPEG-compressed tiles
-- **Generic Pyramidal TIFF**: Standard tiled TIFF with multiple resolutions, JPEG compression
+- **Aperio SVS**: TIFF-based, JPEG or JPEG 2000 tiles
+- **Generic Pyramidal TIFF**: Standard tiled TIFF with multiple resolutions, JPEG or JPEG 2000 compression
 
 ### Supported Subset (Strict)
 
@@ -59,7 +59,7 @@ The following constraints define what slides are supported. Slides outside this 
 
 - Signed URL authentication using HMAC-SHA256
 - Configurable signature TTL
-- Path-based signatures preventing URL tampering
+- Path + query signatures preventing URL tampering
 
 ### Deployment
 
@@ -74,7 +74,7 @@ The following constraints define what slides are supported. Slides outside this 
 1. **Single-tile API endpoint**: `GET /tiles/{slide_id}/{level}/{x}/{y}.jpg`
 2. **Health check endpoint**: `GET /health`
 3. **S3-compatible storage backend** with range request support
-4. **Native format parsers** for SVS and generic pyramidal TIFF (JPEG-compressed, tiled only)
+4. **Native format parsers** for SVS and generic pyramidal TIFF (JPEG/JPEG 2000, tiled only)
 5. **In-memory LRU caching** for chunks, tiles, and slide metadata
 6. **Signed URL authentication** with HMAC-SHA256
 7. **Docker container** deployment
@@ -402,7 +402,7 @@ Reject unsupported slides early with clear errors:
 - Check for tile tags (TileWidth, TileLength, TileOffsets, TileByteCounts)
 - If strip tags present instead (StripOffsets, StripByteCounts), return 415
 - Check compression tag value
-- If not JPEG (value 7), return 415 with message indicating compression type
+- If not JPEG (value 7) or JPEG 2000 (value 33003), return 415 with message indicating compression type
 - Verify tile dimensions are present and reasonable
 
 ---
@@ -449,8 +449,8 @@ Handle Aperio SVS format specifics, with JPEGTables as first-class requirement:
 #### Step 3.3: Implement Generic TIFF Reader
 
 Handle standard pyramidal TIFF:
-- Support standard tiled TIFF structure with JPEG compression
-- Validate tiled organization and JPEG compression
+- Support standard tiled TIFF structure with JPEG or JPEG 2000 compression
+- Validate tiled organization and JPEG/JPEG 2000 compression
 - Return 415 for unsupported configurations
 
 ---
@@ -526,7 +526,7 @@ Handle incoming HTTP requests:
 Verify signed URLs:
 - Extract signature and expiry from query parameters
 - Verify expiry is in the future
-- Reconstruct signed string from path and expiry
+- Reconstruct signed string from path and canonicalized query params (excluding sig)
 - Compute expected signature using HMAC-SHA256
 - Compare signatures using constant-time comparison
 - Reject invalid or expired signatures with 401
@@ -614,8 +614,8 @@ Verify end-to-end functionality with focus on critical areas:
 The MVP is complete when:
 
 1. A viewer developer can configure their viewer to use WSI Streamer as a tile source
-2. Tiles are served correctly for SVS and generic pyramidal TIFF (JPEG-compressed, tiled)
-3. Unsupported slides (strips, non-JPEG compression, unknown formats) return 415
+2. Tiles are served correctly for SVS and generic pyramidal TIFF (JPEG or JPEG 2000, tiled)
+3. Unsupported slides (strips, non-JPEG/JPEG 2000 compression, unknown formats) return 415
 4. The service runs in Docker
 5. Authentication prevents unauthorized access
 6. Caching works (repeated requests are faster than initial requests)
@@ -641,4 +641,3 @@ These specific tests verify the hard parts are working:
 - Cold start parses slide with bounded S3 request count (e.g., <20 requests)
 - Concurrent requests for same slide don't cause duplicate S3 requests (singleflight working)
 - Sequential tile requests benefit from block cache (visible in latency)
-
