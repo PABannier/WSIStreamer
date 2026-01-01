@@ -34,7 +34,7 @@ use crate::error::TileError;
 use crate::slide::{SlideRegistry, SlideSource};
 
 use super::cache::{TileCache, TileCacheKey};
-use super::encoder::{JpegTileEncoder, DEFAULT_JPEG_QUALITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY};
+use super::encoder::{is_valid_quality, JpegTileEncoder, DEFAULT_JPEG_QUALITY};
 
 // =============================================================================
 // Tile Request
@@ -206,8 +206,13 @@ impl<S: SlideSource> TileService<S> {
     /// - The tile coordinates are out of bounds
     /// - The tile data cannot be decoded or encoded
     pub async fn get_tile(&self, request: TileRequest) -> Result<TileResponse, TileError> {
-        // Clamp quality to valid range
-        let quality = request.quality.clamp(MIN_JPEG_QUALITY, MAX_JPEG_QUALITY);
+        // Validate quality
+        if !is_valid_quality(request.quality) {
+            return Err(TileError::InvalidQuality {
+                quality: request.quality,
+            });
+        }
+        let quality = request.quality;
 
         // Create cache key
         let cache_key = TileCacheKey::new(
@@ -265,7 +270,10 @@ impl<S: SlideSource> TileService<S> {
                 }
                 crate::error::FormatError::Tiff(tiff_err) => TileError::Slide(tiff_err),
                 crate::error::FormatError::UnsupportedFormat { reason } => {
-                    TileError::Slide(crate::error::TiffError::UnsupportedCompression(reason))
+                    TileError::Slide(crate::error::TiffError::InvalidTagValue {
+                        tag: "Format",
+                        message: reason,
+                    })
                 }
             })?;
 
@@ -706,20 +714,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_quality_clamping() {
+    async fn test_quality_validation() {
         let tiff_data = create_tiff_with_jpeg_tile();
         let source = MockSlideSource::new(tiff_data);
         let registry = SlideRegistry::new(source);
         let service = TileService::new(registry);
 
-        // Quality 0 should be clamped to 1
+        // Quality 0 should be rejected
         let request = TileRequest::with_quality("test.tif", 0, 0, 0, 0);
-        let response = service.get_tile(request).await.unwrap();
-        assert_eq!(response.quality, 1);
+        let result = service.get_tile(request).await;
+        assert!(matches!(
+            result,
+            Err(TileError::InvalidQuality { quality: 0 })
+        ));
 
-        // Quality 255 should be clamped to 100
+        // Quality 255 should be rejected
         let request = TileRequest::with_quality("test.tif", 0, 1, 0, 255);
-        let response = service.get_tile(request).await.unwrap();
-        assert_eq!(response.quality, 100);
+        let result = service.get_tile(request).await;
+        assert!(matches!(
+            result,
+            Err(TileError::InvalidQuality { quality: 255 })
+        ));
     }
 }

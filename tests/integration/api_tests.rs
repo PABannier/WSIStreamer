@@ -83,6 +83,28 @@ async fn test_tile_retrieval_with_quality() {
 }
 
 #[tokio::test]
+async fn test_tile_retrieval_invalid_quality_rejected() {
+    let tiff_data = create_tiff_with_jpeg_tile();
+    let source = MockSlideSource::new().with_slide("test.tif", tiff_data);
+    let registry = SlideRegistry::new(source);
+    let tile_service = TileService::new(registry);
+    let router = create_router(tile_service, RouterConfig::without_auth());
+
+    // Quality 0 is invalid
+    let request = Request::builder()
+        .uri("/tiles/test.tif/0/0/0.jpg?quality=0")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"], "invalid_quality");
+}
+
+#[tokio::test]
 async fn test_tile_retrieval_without_jpg_extension() {
     let tiff_data = create_tiff_with_jpeg_tile();
     let source = MockSlideSource::new().with_slide("test.tif", tiff_data);

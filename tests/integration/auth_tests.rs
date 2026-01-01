@@ -44,7 +44,12 @@ async fn test_valid_signature_succeeds() {
         .unwrap();
 
     let response = router.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    if response.status() != StatusCode::OK {
+        let status = response.status();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        panic!("unexpected status {} with error {}", status, error);
+    }
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     assert!(is_valid_jpeg(&body));
@@ -61,7 +66,8 @@ async fn test_valid_signature_with_quality_param() {
     // Generate signed URL
     let auth = SignedUrlAuth::new(TEST_SECRET);
     let path = "/tiles/test.tif/0/0/0.jpg";
-    let (signature, expiry) = auth.sign(path, Duration::from_secs(3600));
+    let (signature, expiry) =
+        auth.sign_with_params(path, Duration::from_secs(3600), &[("quality", "90")]);
 
     // Add quality parameter
     let request = Request::builder()
@@ -75,6 +81,31 @@ async fn test_valid_signature_with_quality_param() {
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-tile-quality").unwrap(), "90");
+}
+
+#[tokio::test]
+async fn test_signature_without_quality_rejected() {
+    let tiff_data = create_tiff_with_jpeg_tile();
+    let source = MockSlideSource::new().with_slide("test.tif", tiff_data);
+    let registry = SlideRegistry::new(source);
+    let tile_service = TileService::new(registry);
+    let router = create_router(tile_service, RouterConfig::new(TEST_SECRET));
+
+    let auth = SignedUrlAuth::new(TEST_SECRET);
+    let path = "/tiles/test.tif/0/0/0.jpg";
+    let (signature, expiry) = auth.sign(path, Duration::from_secs(3600));
+
+    // Add quality parameter without signing it
+    let request = Request::builder()
+        .uri(format!(
+            "{}?quality=90&sig={}&exp={}",
+            path, signature, expiry
+        ))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 // =============================================================================

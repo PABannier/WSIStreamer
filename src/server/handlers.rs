@@ -258,20 +258,23 @@ impl IntoResponse for TileError {
                 format!("Invalid quality: {} (must be 1-100)", quality),
             ),
 
-            // 415 Unsupported Media Type - Format not supported
-            TileError::Slide(TiffError::UnsupportedCompression(compression)) => (
-                StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                "unsupported_format",
-                format!(
-                    "Unsupported compression: {} (only JPEG is supported)",
-                    compression
+            // TIFF structure errors map to 415 Unsupported Media Type
+            TileError::Slide(TiffError::Io(io_err)) => match io_err {
+                IoError::NotFound(path) => (
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    format!("Resource not found: {}", path),
                 ),
-            ),
-
-            TileError::Slide(TiffError::StripOrganization) => (
+                _ => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "io_error",
+                    format!("I/O error: {}", io_err),
+                ),
+            },
+            TileError::Slide(tiff_err) => (
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "unsupported_format",
-                "Unsupported organization: file uses strips instead of tiles".to_string(),
+                tiff_err.to_string(),
             ),
 
             // 500 Internal Server Error - I/O and processing errors
@@ -301,13 +304,6 @@ impl IntoResponse for TileError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "encode_error",
                 format!("Failed to encode tile: {}", message),
-            ),
-
-            // Other slide/TIFF errors
-            TileError::Slide(tiff_err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "slide_error",
-                format!("Slide processing error: {}", tiff_err),
             ),
         };
 
@@ -375,28 +371,32 @@ impl IntoResponse for FormatError {
             },
 
             FormatError::Tiff(tiff_err) => match tiff_err {
-                TiffError::UnsupportedCompression(compression) => (
-                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    "unsupported_format",
-                    format!(
-                        "Unsupported compression: {} (only JPEG is supported)",
-                        compression
+                TiffError::Io(io_err) => match io_err {
+                    IoError::NotFound(path) => (
+                        StatusCode::NOT_FOUND,
+                        "not_found",
+                        format!("Slide not found: {}", path),
                     ),
-                ),
-                TiffError::StripOrganization => (
-                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    "unsupported_format",
-                    "Unsupported organization: file uses strips instead of tiles".to_string(),
-                ),
-                TiffError::InvalidMagic(_) | TiffError::InvalidVersion(_) => (
-                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    "unsupported_format",
-                    format!("Unsupported file format: {}", tiff_err),
-                ),
+                    IoError::S3(msg) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "storage_error",
+                        format!("Storage error: {}", msg),
+                    ),
+                    IoError::Connection(msg) => (
+                        StatusCode::BAD_GATEWAY,
+                        "connection_error",
+                        format!("Connection error: {}", msg),
+                    ),
+                    IoError::RangeOutOfBounds { .. } => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "io_error",
+                        format!("I/O error: {}", io_err),
+                    ),
+                },
                 _ => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "slide_error",
-                    format!("Slide processing error: {}", tiff_err),
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "unsupported_format",
+                    tiff_err.to_string(),
                 ),
             },
 
@@ -798,10 +798,10 @@ mod tests {
         let response = err.into_response();
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 
-        // Test other TiffError -> 500
+        // Test other TiffError -> 415
         let err = FormatError::Tiff(TiffError::MissingTag("TileOffsets"));
         let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 
     #[test]

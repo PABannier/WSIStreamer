@@ -8,7 +8,7 @@
 //!
 //! The following constraints define what slides are supported:
 //! - **Organization**: Tiled only (no strips)
-//! - **Compression**: JPEG only (no LZW, Deflate, JPEG2000)
+//! - **Compression**: JPEG or JPEG 2000 (no LZW, Deflate)
 //! - **Format**: Standard TIFF or BigTIFF
 //! - **Structure**: Must have tile offsets and byte counts tags
 //!
@@ -83,6 +83,13 @@ impl ValidationResult {
 /// A specific validation error.
 #[derive(Debug, Clone)]
 pub enum ValidationError {
+    /// Missing required tag
+    MissingTag {
+        /// Index of the IFD missing the tag
+        ifd_index: usize,
+        /// The missing tag name
+        tag: &'static str,
+    },
     /// File uses strip organization instead of tiles
     StripOrganization {
         /// Index of the IFD with strip organization
@@ -126,6 +133,7 @@ pub enum ValidationError {
 impl From<ValidationError> for TiffError {
     fn from(error: ValidationError) -> Self {
         match error {
+            ValidationError::MissingTag { tag, .. } => TiffError::MissingTag(tag),
             ValidationError::StripOrganization { .. } => TiffError::StripOrganization,
             ValidationError::UnsupportedCompression {
                 compression_name, ..
@@ -188,8 +196,12 @@ pub fn validate_ifd(ifd: &Ifd, ifd_index: usize, byte_order: ByteOrder) -> Valid
                 compression_name: format!("Unknown ({})", compression_value),
             });
         }
+    } else {
+        result.add_error(ValidationError::MissingTag {
+            ifd_index,
+            tag: "Compression",
+        });
     }
-    // If no compression tag, assume JPEG (common default)
 
     // Check for required tile tags
     let mut missing_tags = Vec::new();
@@ -247,23 +259,30 @@ pub fn validate_ifd(ifd: &Ifd, ifd_index: usize, byte_order: ByteOrder) -> Valid
 }
 
 /// Validate a pyramid level for WSI support.
-pub fn validate_level(level: &PyramidLevel, _byte_order: ByteOrder) -> ValidationResult {
+pub fn validate_level(level: &PyramidLevel, byte_order: ByteOrder) -> ValidationResult {
     let mut result = ValidationResult::ok();
 
     // Check compression
-    if let Some(compression) = Compression::from_u16(level.compression) {
-        if !compression.is_supported() {
+    if let Some(compression_value) = level.ifd.compression(byte_order) {
+        if let Some(compression) = Compression::from_u16(compression_value) {
+            if !compression.is_supported() {
+                result.add_error(ValidationError::UnsupportedCompression {
+                    ifd_index: level.ifd_index,
+                    compression: compression_value,
+                    compression_name: compression.name().to_string(),
+                });
+            }
+        } else {
             result.add_error(ValidationError::UnsupportedCompression {
                 ifd_index: level.ifd_index,
-                compression: level.compression,
-                compression_name: compression.name().to_string(),
+                compression: compression_value,
+                compression_name: format!("Unknown ({})", compression_value),
             });
         }
     } else {
-        result.add_error(ValidationError::UnsupportedCompression {
+        result.add_error(ValidationError::MissingTag {
             ifd_index: level.ifd_index,
-            compression: level.compression,
-            compression_name: format!("Unknown ({})", level.compression),
+            tag: "Compression",
         });
     }
 
@@ -293,12 +312,16 @@ pub fn validate_level(level: &PyramidLevel, _byte_order: ByteOrder) -> Validatio
     }
 
     // Check for JPEGTables on JPEG-compressed levels
-    if level.compression == 7 && level.jpeg_tables_entry.is_none() {
-        // This is a warning, not an error - some files have inline tables
-        result.add_warning(format!(
-            "Level {}: No JPEGTables tag found (tiles may have inline tables)",
-            level.level_index
-        ));
+    if level.jpeg_tables_entry.is_none() {
+        if let Some(compression_value) = level.ifd.compression(byte_order) {
+            if compression_value == 7 {
+                // This is a warning, not an error - some files have inline tables
+                result.add_warning(format!(
+                    "Level {}: No JPEGTables tag found (tiles may have inline tables)",
+                    level.level_index
+                ));
+            }
+        }
     }
 
     result
@@ -340,7 +363,7 @@ pub fn validate_pyramid(pyramid: &TiffPyramid) -> ValidationResult {
 
 /// Check if an IFD uses supported compression.
 ///
-/// Returns Ok(()) if compression is JPEG, or an error otherwise.
+/// Returns Ok(()) if compression is JPEG or JPEG 2000, or an error otherwise.
 pub fn check_compression(ifd: &Ifd, byte_order: ByteOrder) -> Result<(), TiffError> {
     if let Some(compression_value) = ifd.compression(byte_order) {
         if let Some(compression) = Compression::from_u16(compression_value) {
@@ -356,8 +379,8 @@ pub fn check_compression(ifd: &Ifd, byte_order: ByteOrder) -> Result<(), TiffErr
             compression_value
         )));
     }
-    // No compression tag - assume JPEG (common default)
-    Ok(())
+    // No compression tag - reject in strict mode
+    Err(TiffError::MissingTag("Compression"))
 }
 
 /// Check if an IFD uses tiled organization.

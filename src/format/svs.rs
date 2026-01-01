@@ -34,7 +34,9 @@ use crate::io::RangeReader;
 use crate::slide::SlideReader;
 
 use super::jpeg::prepare_tile_jpeg;
-use super::tiff::{PyramidLevel, TiffHeader, TiffPyramid, TiffTag, TileData, ValueReader};
+use super::tiff::{
+    validate_pyramid, PyramidLevel, TiffHeader, TiffPyramid, TiffTag, TileData, ValueReader,
+};
 
 // =============================================================================
 // SVS Metadata
@@ -177,6 +179,12 @@ impl SvsReader {
     pub async fn open<R: RangeReader>(reader: &R) -> Result<Self, TiffError> {
         // Parse the TIFF pyramid structure
         let pyramid = TiffPyramid::parse(reader).await?;
+
+        // Validate the pyramid meets our requirements
+        let validation = validate_pyramid(&pyramid);
+        if !validation.is_valid {
+            return Err(validation.into_result().unwrap_err());
+        }
 
         // Load tile data for each pyramid level
         let mut levels = Vec::with_capacity(pyramid.levels.len());

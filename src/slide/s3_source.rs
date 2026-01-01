@@ -114,16 +114,25 @@ impl SlideSource for S3SlideSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
+    use hyper_rustls::HttpsConnectorBuilder;
 
     #[test]
     fn test_s3_slide_source_bucket() {
         // We can't test actual S3 operations without credentials,
         // but we can test the basic structure
-        let client = aws_sdk_s3::Client::from_conf(
-            aws_sdk_s3::Config::builder()
-                .behavior_version_latest()
-                .build(),
-        );
+        let https_connector = HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_only()
+            .enable_http1()
+            .enable_http2()
+            .build();
+        let http_client = HyperClientBuilder::new().build(https_connector);
+        let config = aws_sdk_s3::Config::builder()
+            .behavior_version_latest()
+            .http_client(http_client)
+            .build();
+        let client = aws_sdk_s3::Client::from_conf(config);
         let source = S3SlideSource::new(client, "test-bucket".to_string());
         assert_eq!(source.bucket(), "test-bucket");
     }
