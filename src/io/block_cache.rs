@@ -354,7 +354,10 @@ mod tests {
             async fn read_exact_at(&self, offset: u64, len: usize) -> Result<Bytes, IoError> {
                 // Check if another read is in progress (would indicate singleflight failure)
                 let was_reading = self.is_reading.swap(true, Ordering::SeqCst);
-                assert!(!was_reading, "Concurrent reads detected - singleflight failed!");
+                assert!(
+                    !was_reading,
+                    "Concurrent reads detected - singleflight failed!"
+                );
 
                 self.read_count.fetch_add(1, Ordering::SeqCst);
                 sleep(Duration::from_millis(50)).await;

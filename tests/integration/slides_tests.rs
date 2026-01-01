@@ -286,7 +286,8 @@ async fn test_slides_list_with_valid_auth() {
 
     // Generate signed URL
     let auth = SignedUrlAuth::new(secret);
-    let signed_url = auth.generate_signed_url("", "/slides", std::time::Duration::from_secs(300), &[]);
+    let signed_url =
+        auth.generate_signed_url("", "/slides", std::time::Duration::from_secs(300), &[]);
 
     let request = Request::builder()
         .uri(&signed_url)

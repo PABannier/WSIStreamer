@@ -12,11 +12,11 @@ use tower::ServiceExt;
 
 use wsi_streamer::slide::SlideRegistry;
 use wsi_streamer::tile::TileService;
-use wsi_streamer::{RouterConfig, create_router};
+use wsi_streamer::{create_router, RouterConfig};
 
 use super::test_utils::{
-    MockSlideSource, create_tiff_with_jpeg_tile, create_tiff_with_lzw_compression,
-    create_strip_tiff, is_valid_jpeg,
+    create_strip_tiff, create_tiff_with_jpeg_tile, create_tiff_with_lzw_compression, is_valid_jpeg,
+    MockSlideSource,
 };
 
 // =============================================================================
@@ -79,10 +79,7 @@ async fn test_tile_retrieval_with_quality() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // Check quality header
-    assert_eq!(
-        response.headers().get("x-tile-quality").unwrap(),
-        "50"
-    );
+    assert_eq!(response.headers().get("x-tile-quality").unwrap(), "50");
 }
 
 #[tokio::test]
@@ -136,10 +133,7 @@ async fn test_cache_hit_header() {
 
     let response2 = router.oneshot(request2).await.unwrap();
     assert_eq!(response2.status(), StatusCode::OK);
-    assert_eq!(
-        response2.headers().get("x-tile-cache-hit").unwrap(),
-        "true"
-    );
+    assert_eq!(response2.headers().get("x-tile-cache-hit").unwrap(), "true");
 }
 
 // =============================================================================
@@ -337,7 +331,12 @@ async fn test_multiple_tiles_same_slide() {
         );
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        assert!(is_valid_jpeg(&body), "Tile ({}, {}) should be valid JPEG", x, y);
+        assert!(
+            is_valid_jpeg(&body),
+            "Tile ({}, {}) should be valid JPEG",
+            x,
+            y
+        );
     }
 }
 

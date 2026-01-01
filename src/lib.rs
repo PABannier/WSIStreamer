@@ -15,29 +15,28 @@ pub mod tile;
 pub use config::Config;
 pub use error::{FormatError, IoError, TiffError, TileError};
 pub use format::tiff::{
-    ByteOrder, Compression, FieldType, Ifd, IfdEntry, PyramidLevel, TiffHeader, TiffPyramid,
-    TiffTag, TileData, ValidationError, ValidationResult, ValueReader, BIGTIFF_HEADER_SIZE,
-    TIFF_HEADER_SIZE, check_compression, check_tile_tags, check_tiled, parse_u32_array,
-    parse_u64_array, validate_ifd, validate_ifd_strict, validate_level, validate_pyramid,
+    check_compression, check_tile_tags, check_tiled, parse_u32_array, parse_u64_array,
+    validate_ifd, validate_ifd_strict, validate_level, validate_pyramid, ByteOrder, Compression,
+    FieldType, Ifd, IfdEntry, PyramidLevel, TiffHeader, TiffPyramid, TiffTag, TileData,
+    ValidationError, ValidationResult, ValueReader, BIGTIFF_HEADER_SIZE, TIFF_HEADER_SIZE,
 };
-pub use format::{SlideFormat, detect_format, is_tiff_header};
+pub use format::{detect_format, is_tiff_header, SlideFormat};
 pub use format::{
-    GenericTiffLevelData, GenericTiffReader,
-    SvsLevelData, SvsMetadata, SvsReader,
     is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
+    GenericTiffLevelData, GenericTiffReader, SvsLevelData, SvsMetadata, SvsReader,
 };
-pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
+pub use io::{create_s3_client, BlockCache, RangeReader, S3RangeReader};
+pub use server::{
+    auth_middleware, create_dev_router, create_production_router, create_router, health_handler,
+    slides_handler, tile_handler, AppState, AuthError, AuthQueryParams, ErrorResponse,
+    HealthResponse, OptionalAuth, RouterConfig, SignedUrlAuth, SlidesQueryParams, SlidesResponse,
+    TilePathParams, TileQueryParams,
+};
 pub use slide::{
     CachedSlide, LevelInfo, S3SlideSource, SlideListResult, SlideReader, SlideRegistry, SlideSource,
 };
 pub use tile::{
-    JpegTileEncoder, TileCache, TileCacheKey, TileRequest, TileResponse, TileService,
-    DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
-    clamp_quality, is_valid_quality,
-};
-pub use server::{
-    AppState, ErrorResponse, HealthResponse, SlidesQueryParams, SlidesResponse, TilePathParams,
-    TileQueryParams, health_handler, slides_handler, tile_handler,
-    AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth, auth_middleware,
-    RouterConfig, create_router, create_dev_router, create_production_router,
+    clamp_quality, is_valid_quality, JpegTileEncoder, TileCache, TileCacheKey, TileRequest,
+    TileResponse, TileService, DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY, MAX_JPEG_QUALITY,
+    MIN_JPEG_QUALITY,
 };

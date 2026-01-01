@@ -15,9 +15,9 @@ use tower::ServiceExt;
 
 use wsi_streamer::slide::SlideRegistry;
 use wsi_streamer::tile::TileService;
-use wsi_streamer::{RouterConfig, SignedUrlAuth, create_router};
+use wsi_streamer::{create_router, RouterConfig, SignedUrlAuth};
 
-use super::test_utils::{MockSlideSource, create_tiff_with_jpeg_tile, is_valid_jpeg};
+use super::test_utils::{create_tiff_with_jpeg_tile, is_valid_jpeg, MockSlideSource};
 
 const TEST_SECRET: &str = "test-secret-key-for-hmac-signing";
 
@@ -65,7 +65,10 @@ async fn test_valid_signature_with_quality_param() {
 
     // Add quality parameter
     let request = Request::builder()
-        .uri(format!("{}?quality=90&sig={}&exp={}", path, signature, expiry))
+        .uri(format!(
+            "{}?quality=90&sig={}&exp={}",
+            path, signature, expiry
+        ))
         .body(Body::empty())
         .unwrap();
 
@@ -251,7 +254,7 @@ async fn test_invalid_hex_signature_rejected() {
     // because it's treated as an auth failure
     assert!(
         response.status() == StatusCode::BAD_REQUEST
-        || response.status() == StatusCode::UNAUTHORIZED,
+            || response.status() == StatusCode::UNAUTHORIZED,
         "Expected 400 or 401, got {}",
         response.status()
     );

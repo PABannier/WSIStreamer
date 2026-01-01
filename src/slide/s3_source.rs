@@ -21,9 +21,7 @@ const SLIDE_EXTENSIONS: &[&str] = &[".svs", ".tif", ".tiff"];
 /// Check if a file path has a supported slide extension.
 fn is_slide_file(path: &str) -> bool {
     let path_lower = path.to_lowercase();
-    SLIDE_EXTENSIONS
-        .iter()
-        .any(|ext| path_lower.ends_with(ext))
+    SLIDE_EXTENSIONS.iter().any(|ext| path_lower.ends_with(ext))
 }
 
 /// S3-backed implementation of `SlideSource`.
@@ -70,7 +68,12 @@ impl SlideSource for S3SlideSource {
     type Reader = S3RangeReader;
 
     async fn create_reader(&self, slide_id: &str) -> Result<Self::Reader, IoError> {
-        S3RangeReader::new(self.client.clone(), self.bucket.clone(), slide_id.to_string()).await
+        S3RangeReader::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            slide_id.to_string(),
+        )
+        .await
     }
 
     async fn list_slides(

@@ -27,7 +27,7 @@ pub use parser::{ByteOrder, Ifd, IfdEntry, TiffHeader, BIGTIFF_HEADER_SIZE, TIFF
 pub use pyramid::{PyramidLevel, TiffPyramid, TileData};
 pub use tags::{Compression, FieldType, TiffTag};
 pub use validation::{
-    ValidationError, ValidationResult, check_compression, check_tile_tags, check_tiled,
-    validate_ifd, validate_ifd_strict, validate_level, validate_pyramid,
+    check_compression, check_tile_tags, check_tiled, validate_ifd, validate_ifd_strict,
+    validate_level, validate_pyramid, ValidationError, ValidationResult,
 };
-pub use values::{ValueReader, parse_u32_array, parse_u64_array};
+pub use values::{parse_u32_array, parse_u64_array, ValueReader};
