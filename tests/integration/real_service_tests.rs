@@ -49,12 +49,9 @@ const SVS_PATH_ENV: &str = "WSI_TEST_SVS_PATH";
 /// Slide ID used in tests (the object key in MinIO)
 const TEST_SLIDE_ID: &str = "test-slide.svs";
 
-/// Check if an error response indicates an unsupported format (JPEG 2000, LZW, etc.)
+/// Check if an error response indicates an unsupported format (LZW, Deflate, etc.)
+/// Note: JPEG 2000 is now supported, so it's not treated as an unsupported format.
 fn is_unsupported_format_error(body: &str) -> bool {
-    // JPEG 2000 markers (FF4F is SOC marker for JPEG 2000)
-    if body.contains("Illegal start bytes:FF4F") {
-        return true;
-    }
     // Generic unsupported compression check
     if body.contains("unsupported") || body.contains("Unsupported") {
         return true;
@@ -247,20 +244,12 @@ async fn test_real_svs_tile_retrieval() {
     if status.is_success() {
         println!("Tile request successful (200 OK)");
     } else {
-        // Check if this is an unsupported format (JPEG 2000, LZW, etc.)
+        // Check if this is an unsupported format (LZW, Deflate, etc.)
+        // Note: JPEG 2000 is now supported, so we expect success for J2K tiles
         let body = response.text().await.unwrap_or_default();
         println!("Tile request returned {}: {}", status, body);
 
-        // JPEG 2000 (FF4F marker) and other non-JPEG compression are outside
-        // the supported subset. This is expected behavior, not a test failure.
-        if body.contains("Illegal start bytes:FF4F") {
-            println!("NOTE: SVS file uses JPEG 2000 compression (FF4F marker detected)");
-            println!("JPEG 2000 is outside the supported subset (JPEG-only).");
-            println!("Test PASSED - server correctly rejected unsupported format.");
-            return;
-        }
-
-        if body.contains("unsupported") || body.contains("compression") {
+        if is_unsupported_format_error(&body) {
             println!("NOTE: SVS file uses unsupported compression format.");
             println!("Test PASSED - server correctly rejected unsupported format.");
             return;

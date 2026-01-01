@@ -76,7 +76,7 @@ pub enum TiffError {
     InvalidTagValue { tag: &'static str, message: String },
 
     /// Unsupported compression scheme
-    #[error("Unsupported compression: {0} (only JPEG is supported)")]
+    #[error("Unsupported compression: {0} (only JPEG and JPEG 2000 are supported)")]
     UnsupportedCompression(String),
 
     /// File uses strips instead of tiles

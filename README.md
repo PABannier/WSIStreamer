@@ -51,7 +51,7 @@ The project implements native Rust parsers for a focused subset of WSI formats, 
 The following constraints define what slides are supported. Slides outside this subset return HTTP 415 Unsupported Media Type:
 
 - **Organization**: Tiled only (no strips)
-- **Compression**: JPEG only (no LZW, Deflate, JPEG2000)
+- **Compression**: JPEG and JPEG 2000 (no LZW, Deflate)
 - **Format**: Standard TIFF or BigTIFF
 - **Structure**: Must have tile offsets and byte counts tags
 
@@ -104,7 +104,7 @@ The following constraints define what slides are supported. Slides outside this 
 19. **No tile resizing**: Tiles served at native size only
 20. **No JPEG passthrough optimization**: Always decode and re-encode
 21. **No strip support**: Tiled TIFF only
-22. **No LZW/Deflate compression**: JPEG only
+22. **No LZW/Deflate compression**: JPEG and JPEG 2000 only
 
 ---
 
@@ -167,7 +167,7 @@ The following constraints define what slides are supported. Slides outside this 
 
 2. **Native format parsing**: Rather than using OpenSlide (which requires local files), we implement native Rust parsers that understand TIFF structure and can extract tiles with minimal range requests.
 
-3. **Strict subset**: Rather than attempting broad format coverage, we define a strict supported subset (tiled, JPEG-compressed TIFF) and reject unsupported files with 415.
+3. **Strict subset**: Rather than attempting broad format coverage, we define a strict supported subset (tiled, JPEG or JPEG 2000 compressed TIFF) and reject unsupported files with 415.
 
 4. **Layered caching**: Three cache levels optimize for different access patterns:
    - Block cache: Fixed-size blocks (256KB) with singleflight to prevent duplicate S3 requests

@@ -17,6 +17,7 @@ FROM rust:slim-bookworm AS builder
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -37,6 +38,7 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
+    libopenjp2-7 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
