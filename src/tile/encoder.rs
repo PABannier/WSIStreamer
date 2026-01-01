@@ -83,10 +83,143 @@ fn decode_jpeg2000(data: &[u8]) -> Result<DynamicImage, TileError> {
         message: format!("JPEG 2000 decode error: {}", e),
     })?;
 
-    // Convert to DynamicImage using jpeg2k's TryFrom<&Image> implementation
-    DynamicImage::try_from(&j2k_image).map_err(|e| TileError::DecodeError {
-        message: format!("JPEG 2000 to DynamicImage conversion error: {}", e),
-    })
+    // First, try the standard TryFrom conversion which handles color space
+    // conversion properly for most images. Wrap in catch_unwind to handle
+    // the rare panic case in the jpeg2k crate.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        DynamicImage::try_from(&j2k_image)
+    }));
+
+    match result {
+        Ok(Ok(img)) => Ok(img),
+        Ok(Err(e)) => Err(TileError::DecodeError {
+            message: format!("JPEG 2000 to DynamicImage conversion error: {}", e),
+        }),
+        Err(_) => {
+            // TryFrom panicked - fall back to manual conversion using components
+            decode_jpeg2000_manual(&j2k_image)
+        }
+    }
+}
+
+/// Manual JPEG 2000 decoding fallback for when TryFrom panics.
+///
+/// This handles YCbCr 4:2:0 subsampled images by manually upsampling
+/// and converting to RGB.
+fn decode_jpeg2000_manual(j2k_image: &J2kImage) -> Result<DynamicImage, TileError> {
+    let width = j2k_image.width();
+    let height = j2k_image.height();
+    let num_components = j2k_image.num_components();
+    let components = j2k_image.components();
+
+    if components.is_empty() {
+        return Err(TileError::DecodeError {
+            message: "JPEG 2000 image has no components".to_string(),
+        });
+    }
+
+    match num_components {
+        1 => {
+            // Grayscale - use first component directly
+            let comp = &components[0];
+            let comp_data = comp.data();
+            let comp_width = comp.width();
+            let comp_height = comp.height();
+
+            // Convert i32 to u8
+            let pixels: Vec<u8> = comp_data.iter().map(|&v| v.clamp(0, 255) as u8).collect();
+
+            image::GrayImage::from_raw(comp_width, comp_height, pixels)
+                .map(DynamicImage::ImageLuma8)
+                .ok_or_else(|| TileError::DecodeError {
+                    message: format!(
+                        "Failed to create grayscale image from components: {}x{}",
+                        comp_width, comp_height
+                    ),
+                })
+        }
+        3 => {
+            // RGB or YCbCr - check for subsampling and handle accordingly
+            let y_comp = &components[0];
+            let cb_comp = &components[1];
+            let cr_comp = &components[2];
+
+            // Check if chroma is subsampled
+            let y_width = y_comp.width();
+            let y_height = y_comp.height();
+            let cb_width = cb_comp.width();
+            let cb_height = cb_comp.height();
+
+            if cb_width == y_width && cb_height == y_height {
+                // No subsampling - direct RGB conversion
+                let y_data = y_comp.data();
+                let cb_data = cb_comp.data();
+                let cr_data = cr_comp.data();
+
+                let mut pixels = Vec::with_capacity((y_width * y_height * 3) as usize);
+                for i in 0..(y_width * y_height) as usize {
+                    pixels.push(y_data[i].clamp(0, 255) as u8);
+                    pixels.push(cb_data[i].clamp(0, 255) as u8);
+                    pixels.push(cr_data[i].clamp(0, 255) as u8);
+                }
+
+                image::RgbImage::from_raw(y_width, y_height, pixels)
+                    .map(DynamicImage::ImageRgb8)
+                    .ok_or_else(|| TileError::DecodeError {
+                        message: format!(
+                            "Failed to create RGB image from components: {}x{}",
+                            y_width, y_height
+                        ),
+                    })
+            } else {
+                // Chroma subsampling detected - need to upsample and convert YCbCr to RGB
+                let y_data = y_comp.data();
+                let cb_data = cb_comp.data();
+                let cr_data = cr_comp.data();
+
+                let mut pixels = Vec::with_capacity((y_width * y_height * 3) as usize);
+
+                for y_row in 0..y_height {
+                    for y_col in 0..y_width {
+                        let y_idx = (y_row * y_width + y_col) as usize;
+
+                        // Map Y coordinate to subsampled Cb/Cr coordinate
+                        let cb_col = (y_col * cb_width) / y_width;
+                        let cb_row = (y_row * cb_height) / y_height;
+                        let cb_idx = (cb_row * cb_width + cb_col) as usize;
+
+                        let y_val = y_data[y_idx] as f32;
+                        let cb_val = cb_data.get(cb_idx).copied().unwrap_or(128) as f32 - 128.0;
+                        let cr_val = cr_data.get(cb_idx).copied().unwrap_or(128) as f32 - 128.0;
+
+                        // YCbCr to RGB conversion (ITU-R BT.601)
+                        let r = (y_val + 1.402 * cr_val).clamp(0.0, 255.0) as u8;
+                        let g = (y_val - 0.344136 * cb_val - 0.714136 * cr_val).clamp(0.0, 255.0) as u8;
+                        let b = (y_val + 1.772 * cb_val).clamp(0.0, 255.0) as u8;
+
+                        pixels.push(r);
+                        pixels.push(g);
+                        pixels.push(b);
+                    }
+                }
+
+                image::RgbImage::from_raw(y_width, y_height, pixels)
+                    .map(DynamicImage::ImageRgb8)
+                    .ok_or_else(|| TileError::DecodeError {
+                        message: format!(
+                            "Failed to create RGB image from YCbCr components: {}x{}",
+                            y_width, y_height
+                        ),
+                    })
+            }
+        }
+        _ => Err(TileError::DecodeError {
+            message: format!(
+                "Unsupported JPEG 2000 component count: {} (expected 1 or 3)",
+                num_components
+            ),
+        }),
+    }
 }
 
 /// Default JPEG quality (1-100).
