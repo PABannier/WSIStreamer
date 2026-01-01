@@ -58,5 +58,5 @@ mod registry;
 mod s3_source;
 
 pub use reader::{LevelInfo, SlideReader};
-pub use registry::{CachedSlide, SlideRegistry, SlideSource};
+pub use registry::{CachedSlide, SlideListResult, SlideRegistry, SlideSource};
 pub use s3_source::S3SlideSource;

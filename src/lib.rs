@@ -27,15 +27,17 @@ pub use format::{
     is_abbreviated_stream, is_complete_stream, merge_jpeg_tables, prepare_tile_jpeg,
 };
 pub use io::{BlockCache, RangeReader, S3RangeReader, create_s3_client};
-pub use slide::{CachedSlide, LevelInfo, S3SlideSource, SlideReader, SlideRegistry, SlideSource};
+pub use slide::{
+    CachedSlide, LevelInfo, S3SlideSource, SlideListResult, SlideReader, SlideRegistry, SlideSource,
+};
 pub use tile::{
     JpegTileEncoder, TileCache, TileCacheKey, TileRequest, TileResponse, TileService,
     DEFAULT_JPEG_QUALITY, DEFAULT_TILE_CACHE_CAPACITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
     clamp_quality, is_valid_quality,
 };
 pub use server::{
-    AppState, ErrorResponse, HealthResponse, TilePathParams, TileQueryParams,
-    health_handler, tile_handler,
+    AppState, ErrorResponse, HealthResponse, SlidesQueryParams, SlidesResponse, TilePathParams,
+    TileQueryParams, health_handler, slides_handler, tile_handler,
     AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth, auth_middleware,
     RouterConfig, create_router, create_dev_router, create_production_router,
 };

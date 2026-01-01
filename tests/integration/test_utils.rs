@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 
 use wsi_streamer::error::IoError;
 use wsi_streamer::io::RangeReader;
-use wsi_streamer::slide::SlideSource;
+use wsi_streamer::slide::{SlideListResult, SlideSource};
 
 // =============================================================================
 // Mock Range Reader with Request Tracking
@@ -130,6 +130,17 @@ impl Default for MockSlideSource {
     }
 }
 
+/// Supported slide file extensions for filtering.
+const SLIDE_EXTENSIONS: &[&str] = &[".svs", ".tif", ".tiff"];
+
+/// Check if a file path has a supported slide extension.
+fn is_slide_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    SLIDE_EXTENSIONS
+        .iter()
+        .any(|ext| path_lower.ends_with(ext))
+}
+
 #[async_trait]
 impl SlideSource for MockSlideSource {
     type Reader = TrackingMockReader;
@@ -148,6 +159,40 @@ impl SlideSource for MockSlideSource {
             )),
             None => Err(IoError::NotFound(slide_id.to_string())),
         }
+    }
+
+    async fn list_slides(
+        &self,
+        limit: u32,
+        _cursor: Option<&str>,
+    ) -> Result<SlideListResult, IoError> {
+        // Get all slide keys that have supported extensions
+        let mut slides: Vec<String> = self
+            .slides
+            .keys()
+            .filter(|k| is_slide_file(k))
+            .cloned()
+            .collect();
+
+        // Sort for consistent ordering
+        slides.sort();
+
+        // Apply limit
+        let limit = limit as usize;
+        let has_more = slides.len() > limit;
+        slides.truncate(limit);
+
+        // Simple pagination: use last key as cursor if there are more results
+        let next_cursor = if has_more {
+            slides.last().cloned()
+        } else {
+            None
+        };
+
+        Ok(SlideListResult {
+            slides,
+            next_cursor,
+        })
     }
 }
 

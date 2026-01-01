@@ -8,6 +8,7 @@
 //! ```text
 //! /health                                    - Health check (public)
 //! /tiles/{slide_id}/{level}/{x}/{y}.jpg      - Tile endpoint (protected)
+//! /slides                                    - List slides (protected)
 //! ```
 //!
 //! # Example
@@ -45,7 +46,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use super::auth::SignedUrlAuth;
-use super::handlers::{health_handler, tile_handler, AppState};
+use super::handlers::{health_handler, slides_handler, tile_handler, AppState};
 use crate::slide::SlideSource;
 use crate::tile::TileService;
 
@@ -185,7 +186,7 @@ where
     }
 }
 
-/// Build router with authentication on tile routes.
+/// Build router with authentication on tile and slides routes.
 fn build_protected_router<S>(
     app_state: AppState<S>,
     auth: SignedUrlAuth,
@@ -201,9 +202,15 @@ where
         .route("/{slide_id}/{level}/{x}/{filename}", get(tile_handler::<S>))
         .with_state(app_state.clone());
 
-    // Create nested tiles router with auth applied AFTER nesting
-    let protected_tiles = Router::new()
+    // Protected slides list route (require authentication)
+    let slides_routes = Router::new()
+        .route("/", get(slides_handler::<S>))
+        .with_state(app_state.clone());
+
+    // Create nested routes with auth applied AFTER nesting
+    let protected_routes = Router::new()
         .nest("/tiles", tile_routes)
+        .nest("/slides", slides_routes)
         .layer(middleware::from_fn_with_state(
             auth,
             super::auth::auth_middleware,
@@ -215,7 +222,7 @@ where
 
     // Combine routes
     Router::new()
-        .merge(protected_tiles)
+        .merge(protected_routes)
         .merge(public_routes)
         .layer(cors)
 }
@@ -233,6 +240,7 @@ where
             "/tiles/{slide_id}/{level}/{x}/{filename}",
             get(tile_handler::<S>),
         )
+        .route("/slides", get(slides_handler::<S>))
         .with_state(app_state)
         .layer(cors)
 }
