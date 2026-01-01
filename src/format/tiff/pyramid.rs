@@ -665,19 +665,40 @@ mod tests {
         };
 
         // Exact matches
-        assert_eq!(pyramid.best_level_for_downsample(1.0).unwrap().level_index, 0);
-        assert_eq!(pyramid.best_level_for_downsample(4.0).unwrap().level_index, 1);
-        assert_eq!(pyramid.best_level_for_downsample(16.0).unwrap().level_index, 2);
+        assert_eq!(
+            pyramid.best_level_for_downsample(1.0).unwrap().level_index,
+            0
+        );
+        assert_eq!(
+            pyramid.best_level_for_downsample(4.0).unwrap().level_index,
+            1
+        );
+        assert_eq!(
+            pyramid.best_level_for_downsample(16.0).unwrap().level_index,
+            2
+        );
 
         // In between - should use next higher resolution
-        assert_eq!(pyramid.best_level_for_downsample(2.0).unwrap().level_index, 1);
-        assert_eq!(pyramid.best_level_for_downsample(8.0).unwrap().level_index, 2);
+        assert_eq!(
+            pyramid.best_level_for_downsample(2.0).unwrap().level_index,
+            1
+        );
+        assert_eq!(
+            pyramid.best_level_for_downsample(8.0).unwrap().level_index,
+            2
+        );
 
         // Below minimum - use highest resolution
-        assert_eq!(pyramid.best_level_for_downsample(0.5).unwrap().level_index, 0);
+        assert_eq!(
+            pyramid.best_level_for_downsample(0.5).unwrap().level_index,
+            0
+        );
 
         // Above maximum - use lowest resolution
-        assert_eq!(pyramid.best_level_for_downsample(32.0).unwrap().level_index, 2);
+        assert_eq!(
+            pyramid.best_level_for_downsample(32.0).unwrap().level_index,
+            2
+        );
     }
 
     // -------------------------------------------------------------------------

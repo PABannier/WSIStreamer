@@ -279,10 +279,12 @@ impl<S: SlideSource> TileService<S> {
         }
 
         // Validate tile coordinates
-        let (max_x, max_y) = slide.tile_count(request.level).ok_or(TileError::InvalidLevel {
-            level: request.level,
-            max_levels: level_count,
-        })?;
+        let (max_x, max_y) = slide
+            .tile_count(request.level)
+            .ok_or(TileError::InvalidLevel {
+                level: request.level,
+                max_levels: level_count,
+            })?;
 
         if request.tile_x >= max_x || request.tile_y >= max_y {
             return Err(TileError::TileOutOfBounds {

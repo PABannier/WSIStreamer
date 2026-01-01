@@ -260,7 +260,7 @@ mod tests {
             0xFF, 0xDB, // DQT
             0x00, 0x43, // Length (67 bytes)
             0x00, // Table ID
-            // ... quantization table data would follow
+                  // ... quantization table data would follow
         ];
         assert!(!is_abbreviated_stream(&complete));
     }

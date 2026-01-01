@@ -15,9 +15,9 @@ use tower::ServiceExt;
 
 use wsi_streamer::slide::SlideRegistry;
 use wsi_streamer::tile::TileService;
-use wsi_streamer::{RouterConfig, create_router};
+use wsi_streamer::{create_router, RouterConfig};
 
-use super::test_utils::{MockSlideSource, create_tiff_with_jpeg_tile, is_valid_jpeg};
+use super::test_utils::{create_tiff_with_jpeg_tile, is_valid_jpeg, MockSlideSource};
 
 // =============================================================================
 // Tile Cache Effectiveness
@@ -58,10 +58,7 @@ async fn test_tile_cache_hit_is_faster() {
     assert_eq!(response2.status(), StatusCode::OK);
 
     // Verify it was a cache hit
-    assert_eq!(
-        response2.headers().get("x-tile-cache-hit").unwrap(),
-        "true"
-    );
+    assert_eq!(response2.headers().get("x-tile-cache-hit").unwrap(), "true");
 
     // Cache hit should generally be faster
     // Note: This is a soft assertion since timing can vary
@@ -85,7 +82,10 @@ async fn test_different_tiles_cached_independently() {
         .body(Body::empty())
         .unwrap();
     let response1 = router.clone().oneshot(request1).await.unwrap();
-    assert_eq!(response1.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response1.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
 
     // Request tile (1, 0) - should be cache miss
     let request2 = Request::builder()
@@ -93,7 +93,10 @@ async fn test_different_tiles_cached_independently() {
         .body(Body::empty())
         .unwrap();
     let response2 = router.clone().oneshot(request2).await.unwrap();
-    assert_eq!(response2.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response2.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
 
     // Request tile (0, 0) again - should be cache hit
     let request3 = Request::builder()
@@ -126,7 +129,10 @@ async fn test_quality_affects_cache_key() {
         .body(Body::empty())
         .unwrap();
     let response1 = router.clone().oneshot(request1).await.unwrap();
-    assert_eq!(response1.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response1.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
 
     // Request with quality 90 - should be cache miss (different quality)
     let request2 = Request::builder()
@@ -134,7 +140,10 @@ async fn test_quality_affects_cache_key() {
         .body(Body::empty())
         .unwrap();
     let response2 = router.clone().oneshot(request2).await.unwrap();
-    assert_eq!(response2.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response2.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
 
     // Request with quality 80 again - should be cache hit
     let request3 = Request::builder()
@@ -172,7 +181,10 @@ async fn test_slide_id_affects_cache_key() {
         .body(Body::empty())
         .unwrap();
     let response1 = router.clone().oneshot(request1).await.unwrap();
-    assert_eq!(response1.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response1.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
 
     // Request from slide2 - should be cache miss
     let request2 = Request::builder()
@@ -180,7 +192,10 @@ async fn test_slide_id_affects_cache_key() {
         .body(Body::empty())
         .unwrap();
     let response2 = router.clone().oneshot(request2).await.unwrap();
-    assert_eq!(response2.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response2.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
 
     // Request from slide1 again - should be cache hit
     let request3 = Request::builder()
@@ -281,12 +296,9 @@ async fn test_concurrent_requests_for_same_tile() {
 
             // We need to use `call` because `oneshot` consumes the service
             // For this test, we just verify all complete successfully
-            let response = tower::ServiceExt::oneshot(
-                (*router_clone).clone(),
-                request,
-            )
-            .await
-            .unwrap();
+            let response = tower::ServiceExt::oneshot((*router_clone).clone(), request)
+                .await
+                .unwrap();
 
             (i, response.status())
         }));
@@ -323,12 +335,9 @@ async fn test_concurrent_requests_for_different_tiles() {
                     .body(Body::empty())
                     .unwrap();
 
-                let response = tower::ServiceExt::oneshot(
-                    (*router_clone).clone(),
-                    request,
-                )
-                .await
-                .unwrap();
+                let response = tower::ServiceExt::oneshot((*router_clone).clone(), request)
+                    .await
+                    .unwrap();
 
                 let body = response.into_body().collect().await.unwrap().to_bytes();
                 (x, y, is_valid_jpeg(&body))
@@ -446,7 +455,10 @@ async fn test_default_quality_caching() {
         .body(Body::empty())
         .unwrap();
     let response1 = router.clone().oneshot(request1).await.unwrap();
-    assert_eq!(response1.headers().get("x-tile-cache-hit").unwrap(), "false");
+    assert_eq!(
+        response1.headers().get("x-tile-cache-hit").unwrap(),
+        "false"
+    );
     assert_eq!(response1.headers().get("x-tile-quality").unwrap(), "80");
 
     // Request with explicit quality=80

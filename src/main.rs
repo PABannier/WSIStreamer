@@ -34,8 +34,10 @@ async fn main() {
         info!("  S3 endpoint: {}", endpoint);
     }
     info!("  Auth enabled: {}", config.auth_enabled);
-    info!("  Cache: {} slides, {} blocks/slide, {} tiles",
-        config.cache_slides, config.cache_blocks, config.cache_tiles);
+    info!(
+        "  Cache: {} slides, {} blocks/slide, {} tiles",
+        config.cache_slides, config.cache_blocks, config.cache_tiles
+    );
 
     // Create S3 client
     let s3_client = create_s3_client(config.s3_endpoint.as_deref()).await;
