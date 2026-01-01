@@ -13,12 +13,12 @@ use tower::ServiceExt;
 
 use wsi_streamer::slide::SlideRegistry;
 use wsi_streamer::tile::TileService;
-use wsi_streamer::{RouterConfig, create_router};
+use wsi_streamer::{create_router, RouterConfig};
 
 use super::test_utils::{
-    ByteOrderType, MockSlideSource, create_bigtiff_with_jpeg_tile,
-    create_svs_with_jpeg_tables, create_tiff_with_jpeg_tile,
+    create_bigtiff_with_jpeg_tile, create_svs_with_jpeg_tables, create_tiff_with_jpeg_tile,
     create_tiff_with_jpeg_tile_endian, is_bigtiff_magic, is_tiff_magic, is_valid_jpeg,
+    ByteOrderType, MockSlideSource,
 };
 
 // =============================================================================
@@ -48,7 +48,10 @@ async fn test_little_endian_tiff() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    assert!(is_valid_jpeg(&body), "Tile from little-endian TIFF should be valid JPEG");
+    assert!(
+        is_valid_jpeg(&body),
+        "Tile from little-endian TIFF should be valid JPEG"
+    );
 }
 
 #[tokio::test]
@@ -74,7 +77,10 @@ async fn test_big_endian_tiff() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    assert!(is_valid_jpeg(&body), "Tile from big-endian TIFF should be valid JPEG");
+    assert!(
+        is_valid_jpeg(&body),
+        "Tile from big-endian TIFF should be valid JPEG"
+    );
 }
 
 #[tokio::test]
@@ -129,7 +135,10 @@ async fn test_bigtiff_parsing() {
     let bigtiff_data = create_bigtiff_with_jpeg_tile();
 
     // Verify it's BigTIFF
-    assert!(is_bigtiff_magic(&bigtiff_data), "Should be valid BigTIFF header");
+    assert!(
+        is_bigtiff_magic(&bigtiff_data),
+        "Should be valid BigTIFF header"
+    );
 
     let source = MockSlideSource::new().with_slide("big.tif", bigtiff_data);
     let registry = SlideRegistry::new(source);
@@ -145,7 +154,10 @@ async fn test_bigtiff_parsing() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    assert!(is_valid_jpeg(&body), "Tile from BigTIFF should be valid JPEG");
+    assert!(
+        is_valid_jpeg(&body),
+        "Tile from BigTIFF should be valid JPEG"
+    );
 }
 
 #[tokio::test]
@@ -286,14 +298,21 @@ async fn test_tile_jpeg_markers_correct() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
 
     // Check JPEG markers
-    assert_eq!(body[0], 0xFF, "First byte should be 0xFF (JPEG marker prefix)");
+    assert_eq!(
+        body[0], 0xFF,
+        "First byte should be 0xFF (JPEG marker prefix)"
+    );
     assert_eq!(body[1], 0xD8, "Second byte should be 0xD8 (SOI marker)");
     assert_eq!(
         body[body.len() - 2],
         0xFF,
         "Second-to-last byte should be 0xFF"
     );
-    assert_eq!(body[body.len() - 1], 0xD9, "Last byte should be 0xD9 (EOI marker)");
+    assert_eq!(
+        body[body.len() - 1],
+        0xD9,
+        "Last byte should be 0xD9 (EOI marker)"
+    );
 }
 
 #[tokio::test]
@@ -318,7 +337,12 @@ async fn test_different_quality_produces_different_sizes() {
         .body(Body::empty())
         .unwrap();
     let response_high = router.oneshot(request_high).await.unwrap();
-    let body_high = response_high.into_body().collect().await.unwrap().to_bytes();
+    let body_high = response_high
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
 
     // Both should be valid
     assert!(is_valid_jpeg(&body_low));
@@ -428,6 +452,11 @@ async fn test_corner_tiles() {
         );
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        assert!(is_valid_jpeg(&body), "Corner tile ({}, {}) should be valid", x, y);
+        assert!(
+            is_valid_jpeg(&body),
+            "Corner tile ({}, {}) should be valid",
+            x,
+            y
+        );
     }
 }

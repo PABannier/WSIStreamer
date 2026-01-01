@@ -55,7 +55,12 @@ impl SlideSource for S3SlideSource {
     type Reader = S3RangeReader;
 
     async fn create_reader(&self, slide_id: &str) -> Result<Self::Reader, IoError> {
-        S3RangeReader::new(self.client.clone(), self.bucket.clone(), slide_id.to_string()).await
+        S3RangeReader::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            slide_id.to_string(),
+        )
+        .await
     }
 }
 

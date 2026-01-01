@@ -69,7 +69,7 @@ mod service;
 
 pub use cache::{TileCache, TileCacheKey, DEFAULT_TILE_CACHE_CAPACITY};
 pub use encoder::{
-    JpegTileEncoder, DEFAULT_JPEG_QUALITY, MAX_JPEG_QUALITY, MIN_JPEG_QUALITY,
-    clamp_quality, is_valid_quality,
+    clamp_quality, is_valid_quality, JpegTileEncoder, DEFAULT_JPEG_QUALITY, MAX_JPEG_QUALITY,
+    MIN_JPEG_QUALITY,
 };
 pub use service::{TileRequest, TileResponse, TileService};

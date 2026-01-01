@@ -174,11 +174,9 @@ impl Config {
     pub fn validate(&self) -> Result<(), String> {
         // Check auth secret is provided when auth is enabled
         if self.auth_enabled && self.auth_secret.is_none() {
-            return Err(
-                "Authentication is enabled but no secret provided. \
+            return Err("Authentication is enabled but no secret provided. \
                  Set --auth-secret or WSI_AUTH_SECRET, or disable auth with --auth-enabled=false"
-                    .to_string(),
-            );
+                .to_string());
         }
 
         // Validate bucket is not empty

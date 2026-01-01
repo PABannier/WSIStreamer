@@ -126,7 +126,11 @@ async fn create_minio_client() -> aws_sdk_s3::Client {
 }
 
 /// Upload a file to MinIO
-async fn upload_to_minio(client: &aws_sdk_s3::Client, key: &str, data: Vec<u8>) -> Result<(), String> {
+async fn upload_to_minio(
+    client: &aws_sdk_s3::Client,
+    key: &str,
+    data: Vec<u8>,
+) -> Result<(), String> {
     let body = ByteStream::from(Bytes::from(data));
 
     client
@@ -176,8 +180,16 @@ async fn test_services_available() {
     println!("MinIO available: {}", minio_ok);
     println!("Server available: {}", server_ok);
 
-    assert!(minio_ok, "MinIO service is not available at {}", MINIO_ENDPOINT);
-    assert!(server_ok, "WSI Streamer server is not available at {}", SERVER_URL);
+    assert!(
+        minio_ok,
+        "MinIO service is not available at {}",
+        MINIO_ENDPOINT
+    );
+    assert!(
+        server_ok,
+        "WSI Streamer server is not available at {}",
+        SERVER_URL
+    );
 }
 
 // =============================================================================
@@ -320,7 +332,10 @@ async fn test_real_svs_tile_is_valid_jpeg() {
         .get("content-type")
         .map(|v| v.to_str().unwrap_or(""))
         .unwrap_or("");
-    assert_eq!(content_type, "image/jpeg", "Expected image/jpeg content type");
+    assert_eq!(
+        content_type, "image/jpeg",
+        "Expected image/jpeg content type"
+    );
 
     // Get tile data and verify it's a valid JPEG
     let tile_data = response.bytes().await.expect("Failed to get tile bytes");
@@ -393,7 +408,10 @@ async fn test_real_svs_multiple_tiles() {
                 println!("Test PASSED - server correctly rejected unsupported format.");
                 return;
             }
-            panic!("Tile ({}, {}, {}) request failed: {} - {}", level, x, y, status, body);
+            panic!(
+                "Tile ({}, {}, {}) request failed: {} - {}",
+                level, x, y, status, body
+            );
         }
 
         let tile_data = response.bytes().await.expect("Failed to get tile bytes");
@@ -495,8 +513,16 @@ async fn test_real_svs_different_quality_levels() {
 
     // Higher quality should generally produce larger files
     // (though this isn't always strictly true due to image content)
-    let q30_size = sizes.iter().find(|(q, _)| *q == 30).map(|(_, s)| *s).unwrap();
-    let q95_size = sizes.iter().find(|(q, _)| *q == 95).map(|(_, s)| *s).unwrap();
+    let q30_size = sizes
+        .iter()
+        .find(|(q, _)| *q == 30)
+        .map(|(_, s)| *s)
+        .unwrap();
+    let q95_size = sizes
+        .iter()
+        .find(|(q, _)| *q == 95)
+        .map(|(_, s)| *s)
+        .unwrap();
     assert!(
         q95_size > q30_size,
         "Expected quality 95 ({} bytes) to produce larger file than quality 30 ({} bytes)",
@@ -637,10 +663,7 @@ async fn test_real_svs_pyramid_levels() {
     let mut unsupported_format = false;
 
     for level in 0..10 {
-        let tile_url = format!(
-            "{}/tiles/{}/{}/0/0.jpg",
-            SERVER_URL, TEST_SLIDE_ID, level
-        );
+        let tile_url = format!("{}/tiles/{}/{}/0/0.jpg", SERVER_URL, TEST_SLIDE_ID, level);
 
         let response = http_client
             .get(&tile_url)
@@ -729,7 +752,10 @@ async fn test_slide_not_found_error() {
 
     // Request a tile for a non-existent slide
     let response = http_client
-        .get(format!("{}/tiles/nonexistent-slide.svs/0/0/0.jpg", SERVER_URL))
+        .get(format!(
+            "{}/tiles/nonexistent-slide.svs/0/0/0.jpg",
+            SERVER_URL
+        ))
         .send()
         .await
         .expect("Failed to send request");

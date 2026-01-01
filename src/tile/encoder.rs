@@ -192,7 +192,8 @@ fn decode_jpeg2000_manual(j2k_image: &J2kImage) -> Result<DynamicImage, TileErro
 
                         // YCbCr to RGB conversion (ITU-R BT.601)
                         let r = (y_val + 1.402 * cr_val).clamp(0.0, 255.0) as u8;
-                        let g = (y_val - 0.344136 * cb_val - 0.714136 * cr_val).clamp(0.0, 255.0) as u8;
+                        let g =
+                            (y_val - 0.344136 * cb_val - 0.714136 * cr_val).clamp(0.0, 255.0) as u8;
                         let b = (y_val + 1.772 * cb_val).clamp(0.0, 255.0) as u8;
 
                         pixels.push(r);
@@ -343,9 +344,11 @@ impl JpegTileEncoder {
             TileFormat::Jpeg => {
                 let cursor = Cursor::new(source);
                 let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
-                reader.into_dimensions().map_err(|e| TileError::DecodeError {
-                    message: format!("JPEG dimensions error: {}", e),
-                })
+                reader
+                    .into_dimensions()
+                    .map_err(|e| TileError::DecodeError {
+                        message: format!("JPEG dimensions error: {}", e),
+                    })
             }
             TileFormat::Jpeg2000 => {
                 // jpeg2k requires full decode to get dimensions

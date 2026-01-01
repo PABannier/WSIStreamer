@@ -115,14 +115,14 @@ impl IntoResponse for AuthError {
                 "missing_signature",
                 self.to_string(),
             ),
-            AuthError::MissingExpiry => (
+            AuthError::MissingExpiry => {
+                (StatusCode::UNAUTHORIZED, "missing_expiry", self.to_string())
+            }
+            AuthError::Expired { .. } => (
                 StatusCode::UNAUTHORIZED,
-                "missing_expiry",
+                "signature_expired",
                 self.to_string(),
             ),
-            AuthError::Expired { .. } => {
-                (StatusCode::UNAUTHORIZED, "signature_expired", self.to_string())
-            }
             AuthError::InvalidSignature => (
                 StatusCode::UNAUTHORIZED,
                 "invalid_signature",
@@ -262,8 +262,7 @@ impl SignedUrlAuth {
         }
 
         // Decode the provided signature
-        let provided_sig =
-            hex::decode(signature).map_err(|_| AuthError::InvalidSignatureFormat)?;
+        let provided_sig = hex::decode(signature).map_err(|_| AuthError::InvalidSignatureFormat)?;
 
         // Compute expected signature
         let expected_sig_hex = self.compute_signature(path, expiry);
@@ -403,10 +402,7 @@ where
 {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // Check if auth parameters are present
         let query = parts.uri.query().unwrap_or("");
         let has_sig = query.contains("sig=");

@@ -167,7 +167,9 @@ impl<R: RangeReader + 'static> CachedSlide<R> {
     pub fn best_level_for_downsample(&self, downsample: f64) -> Option<usize> {
         match &self.inner {
             SlideReaderInner::Svs(r) => SlideReader::best_level_for_downsample(r, downsample),
-            SlideReaderInner::GenericTiff(r) => SlideReader::best_level_for_downsample(r, downsample),
+            SlideReaderInner::GenericTiff(r) => {
+                SlideReader::best_level_for_downsample(r, downsample)
+            }
         }
     }
 
@@ -187,9 +189,13 @@ impl<R: RangeReader + 'static> CachedSlide<R> {
         tile_y: u32,
     ) -> Result<Bytes, TiffError> {
         match &self.inner {
-            SlideReaderInner::Svs(r) => r.read_tile(self.reader.as_ref(), level, tile_x, tile_y).await,
+            SlideReaderInner::Svs(r) => {
+                r.read_tile(self.reader.as_ref(), level, tile_x, tile_y)
+                    .await
+            }
             SlideReaderInner::GenericTiff(r) => {
-                r.read_tile(self.reader.as_ref(), level, tile_x, tile_y).await
+                r.read_tile(self.reader.as_ref(), level, tile_x, tile_y)
+                    .await
             }
         }
     }
@@ -505,13 +511,14 @@ mod tests {
         let mut offset = 10;
 
         // Helper to write IFD entry
-        let write_entry = |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
-            data[*offset..*offset + 2].copy_from_slice(&tag.to_le_bytes());
-            data[*offset + 2..*offset + 4].copy_from_slice(&typ.to_le_bytes());
-            data[*offset + 4..*offset + 8].copy_from_slice(&count.to_le_bytes());
-            data[*offset + 8..*offset + 12].copy_from_slice(&value.to_le_bytes());
-            *offset += 12;
-        };
+        let write_entry =
+            |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
+                data[*offset..*offset + 2].copy_from_slice(&tag.to_le_bytes());
+                data[*offset + 2..*offset + 4].copy_from_slice(&typ.to_le_bytes());
+                data[*offset + 4..*offset + 8].copy_from_slice(&count.to_le_bytes());
+                data[*offset + 8..*offset + 12].copy_from_slice(&value.to_le_bytes());
+                *offset += 12;
+            };
 
         // ImageWidth (2048) - tag 256, type LONG (4), count 1, value 2048
         // Using LONG type to accommodate larger values
@@ -718,9 +725,9 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..5 {
             let registry = registry.clone();
-            handles.push(tokio::spawn(async move {
-                registry.get_slide("test.tif").await
-            }));
+            handles.push(tokio::spawn(
+                async move { registry.get_slide("test.tif").await },
+            ));
         }
 
         // Wait for all to complete

@@ -215,10 +215,9 @@ pub fn validate_ifd(ifd: &Ifd, ifd_index: usize, byte_order: ByteOrder) -> Valid
     }
 
     // Validate tile dimensions
-    if let (Some(tile_width), Some(tile_height)) = (
-        ifd.tile_width(byte_order),
-        ifd.tile_height(byte_order),
-    ) {
+    if let (Some(tile_width), Some(tile_height)) =
+        (ifd.tile_width(byte_order), ifd.tile_height(byte_order))
+    {
         // Tile dimensions should be reasonable
         if tile_width == 0 || tile_height == 0 {
             result.add_error(ValidationError::InvalidTileDimensions {
@@ -394,7 +393,11 @@ pub fn check_tile_tags(ifd: &Ifd) -> Result<(), TiffError> {
 ///
 /// This is a convenience function that checks all requirements.
 /// Returns Ok(()) if the IFD is valid for WSI serving.
-pub fn validate_ifd_strict(ifd: &Ifd, ifd_index: usize, byte_order: ByteOrder) -> Result<(), TiffError> {
+pub fn validate_ifd_strict(
+    ifd: &Ifd,
+    ifd_index: usize,
+    byte_order: ByteOrder,
+) -> Result<(), TiffError> {
     let result = validate_ifd(ifd, ifd_index, byte_order);
     result.into_result()
 }
@@ -592,10 +595,7 @@ mod tests {
         assert!(!result.is_valid);
         assert!(matches!(
             result.errors[0],
-            ValidationError::UnsupportedCompression {
-                compression: 5,
-                ..
-            }
+            ValidationError::UnsupportedCompression { compression: 5, .. }
         ));
     }
 

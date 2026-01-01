@@ -227,7 +227,10 @@ impl IntoResponse for TileError {
             TileError::Slide(TiffError::UnsupportedCompression(compression)) => (
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "unsupported_format",
-                format!("Unsupported compression: {} (only JPEG is supported)", compression),
+                format!(
+                    "Unsupported compression: {} (only JPEG is supported)",
+                    compression
+                ),
             ),
 
             TileError::Slide(TiffError::StripOrganization) => (
@@ -467,13 +470,8 @@ pub async fn tile_handler<S: SlideSource>(
     })?;
 
     // Build tile request
-    let request = TileRequest::with_quality(
-        &params.slide_id,
-        params.level,
-        params.x,
-        y,
-        query.quality,
-    );
+    let request =
+        TileRequest::with_quality(&params.slide_id, params.level, params.x, y, query.quality);
 
     // Get tile from service
     let response = state.tile_service.get_tile(request).await?;

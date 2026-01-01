@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use image::codecs::jpeg::JpegEncoder;
-use image::{GrayImage, Luma, RgbImage, Rgb};
+use image::{GrayImage, Luma, Rgb, RgbImage};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -470,7 +470,15 @@ impl IfdBuilder {
         let mut all_entries: Vec<(u16, u16, u32, u64, Option<&Vec<u8>>)> = self
             .entries
             .iter()
-            .map(|e| (e.tag, e.field_type, e.count, e.value, e.external_data.as_ref()))
+            .map(|e| {
+                (
+                    e.tag,
+                    e.field_type,
+                    e.count,
+                    e.value,
+                    e.external_data.as_ref(),
+                )
+            })
             .collect();
 
         // Add TileOffsets (324) and TileByteCounts (325) entries
@@ -624,28 +632,26 @@ pub fn create_tiff_with_jpeg_tile_endian(byte_order: ByteOrderType) -> Vec<u8> {
     let mut data = vec![0u8; total_size];
 
     // Closure to write u16 respecting byte order
-    let write_u16 = |data: &mut [u8], offset: usize, value: u16, byte_order: ByteOrderType| {
-        match byte_order {
+    let write_u16 =
+        |data: &mut [u8], offset: usize, value: u16, byte_order: ByteOrderType| match byte_order {
             ByteOrderType::LittleEndian => {
                 data[offset..offset + 2].copy_from_slice(&value.to_le_bytes())
             }
             ByteOrderType::BigEndian => {
                 data[offset..offset + 2].copy_from_slice(&value.to_be_bytes())
             }
-        }
-    };
+        };
 
     // Closure to write u32 respecting byte order
-    let write_u32 = |data: &mut [u8], offset: usize, value: u32, byte_order: ByteOrderType| {
-        match byte_order {
+    let write_u32 =
+        |data: &mut [u8], offset: usize, value: u32, byte_order: ByteOrderType| match byte_order {
             ByteOrderType::LittleEndian => {
                 data[offset..offset + 4].copy_from_slice(&value.to_le_bytes())
             }
             ByteOrderType::BigEndian => {
                 data[offset..offset + 4].copy_from_slice(&value.to_be_bytes())
             }
-        }
-    };
+        };
 
     // Header
     match byte_order {
@@ -668,23 +674,24 @@ pub fn create_tiff_with_jpeg_tile_endian(byte_order: ByteOrderType) -> Vec<u8> {
 
     // Helper to write IFD entry
     // For inline values, SHORT values need to be left-justified in the 4-byte value field
-    let mut write_entry = |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
-        write_u16(data, *offset, tag, byte_order);
-        write_u16(data, *offset + 2, typ, byte_order);
-        write_u32(data, *offset + 4, count, byte_order);
+    let mut write_entry =
+        |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
+            write_u16(data, *offset, tag, byte_order);
+            write_u16(data, *offset + 2, typ, byte_order);
+            write_u32(data, *offset + 4, count, byte_order);
 
-        // Write value field - for SHORT type (3), left-justify the value
-        if typ == 3 && count == 1 {
-            // SHORT value: store as u16 in first 2 bytes, then pad with zeros
-            write_u16(data, *offset + 8, value as u16, byte_order);
-            data[*offset + 10] = 0;
-            data[*offset + 11] = 0;
-        } else {
-            // LONG value or offset: store as u32
-            write_u32(data, *offset + 8, value, byte_order);
-        }
-        *offset += 12;
-    };
+            // Write value field - for SHORT type (3), left-justify the value
+            if typ == 3 && count == 1 {
+                // SHORT value: store as u16 in first 2 bytes, then pad with zeros
+                write_u16(data, *offset + 8, value as u16, byte_order);
+                data[*offset + 10] = 0;
+                data[*offset + 11] = 0;
+            } else {
+                // LONG value or offset: store as u32
+                write_u32(data, *offset + 8, value, byte_order);
+            }
+            *offset += 12;
+        };
 
     // Entries sorted by tag number
     // ImageWidth (256) = 2048
@@ -702,9 +709,23 @@ pub fn create_tiff_with_jpeg_tile_endian(byte_order: ByteOrderType) -> Vec<u8> {
     // TileLength (323) = 256
     write_entry(&mut data, &mut offset, 323, 4, 1, 256);
     // TileOffsets (324)
-    write_entry(&mut data, &mut offset, 324, 4, tile_count, tile_offsets_offset);
+    write_entry(
+        &mut data,
+        &mut offset,
+        324,
+        4,
+        tile_count,
+        tile_offsets_offset,
+    );
     // TileByteCounts (325)
-    write_entry(&mut data, &mut offset, 325, 4, tile_count, tile_byte_counts_offset);
+    write_entry(
+        &mut data,
+        &mut offset,
+        325,
+        4,
+        tile_count,
+        tile_byte_counts_offset,
+    );
 
     // Next IFD offset (0 = no more IFDs)
     write_u32(&mut data, offset, 0, byte_order);
@@ -851,13 +872,14 @@ pub fn create_strip_tiff() -> Vec<u8> {
 
     let mut offset = 10;
 
-    let write_entry = |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
-        data[*offset..*offset + 2].copy_from_slice(&tag.to_le_bytes());
-        data[*offset + 2..*offset + 4].copy_from_slice(&typ.to_le_bytes());
-        data[*offset + 4..*offset + 8].copy_from_slice(&count.to_le_bytes());
-        data[*offset + 8..*offset + 12].copy_from_slice(&value.to_le_bytes());
-        *offset += 12;
-    };
+    let write_entry =
+        |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
+            data[*offset..*offset + 2].copy_from_slice(&tag.to_le_bytes());
+            data[*offset + 2..*offset + 4].copy_from_slice(&typ.to_le_bytes());
+            data[*offset + 4..*offset + 8].copy_from_slice(&count.to_le_bytes());
+            data[*offset + 8..*offset + 12].copy_from_slice(&value.to_le_bytes());
+            *offset += 12;
+        };
 
     // Entries sorted by tag
     // ImageWidth (256)
@@ -943,13 +965,14 @@ pub fn create_svs_with_jpeg_tables() -> Vec<u8> {
     data[offset..offset + 2].copy_from_slice(&(entry_count as u16).to_le_bytes());
     offset += 2;
 
-    let write_entry = |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
-        data[*offset..*offset + 2].copy_from_slice(&tag.to_le_bytes());
-        data[*offset + 2..*offset + 4].copy_from_slice(&typ.to_le_bytes());
-        data[*offset + 4..*offset + 8].copy_from_slice(&count.to_le_bytes());
-        data[*offset + 8..*offset + 12].copy_from_slice(&value.to_le_bytes());
-        *offset += 12;
-    };
+    let write_entry =
+        |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
+            data[*offset..*offset + 2].copy_from_slice(&tag.to_le_bytes());
+            data[*offset + 2..*offset + 4].copy_from_slice(&typ.to_le_bytes());
+            data[*offset + 4..*offset + 8].copy_from_slice(&count.to_le_bytes());
+            data[*offset + 8..*offset + 12].copy_from_slice(&value.to_le_bytes());
+            *offset += 12;
+        };
 
     // Entries (sorted by tag)
     write_entry(&mut data, &mut offset, 256, 4, 1, 2048); // ImageWidth
@@ -958,8 +981,22 @@ pub fn create_svs_with_jpeg_tables() -> Vec<u8> {
     write_entry(&mut data, &mut offset, 259, 3, 1, 7); // Compression = JPEG
     write_entry(&mut data, &mut offset, 322, 3, 1, 256); // TileWidth
     write_entry(&mut data, &mut offset, 323, 3, 1, 256); // TileLength
-    write_entry(&mut data, &mut offset, 324, 4, tile_count, tile_offsets_offset); // TileOffsets
-    write_entry(&mut data, &mut offset, 325, 4, tile_count, tile_byte_counts_offset); // TileByteCounts
+    write_entry(
+        &mut data,
+        &mut offset,
+        324,
+        4,
+        tile_count,
+        tile_offsets_offset,
+    ); // TileOffsets
+    write_entry(
+        &mut data,
+        &mut offset,
+        325,
+        4,
+        tile_count,
+        tile_byte_counts_offset,
+    ); // TileByteCounts
     write_entry(
         &mut data,
         &mut offset,

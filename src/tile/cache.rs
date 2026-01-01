@@ -56,7 +56,13 @@ pub struct TileCacheKey {
 
 impl TileCacheKey {
     /// Create a new cache key.
-    pub fn new(slide_id: impl Into<Arc<str>>, level: u32, tile_x: u32, tile_y: u32, quality: u8) -> Self {
+    pub fn new(
+        slide_id: impl Into<Arc<str>>,
+        level: u32,
+        tile_x: u32,
+        tile_y: u32,
+        quality: u8,
+    ) -> Self {
         Self {
             slide_id: slide_id.into(),
             level,

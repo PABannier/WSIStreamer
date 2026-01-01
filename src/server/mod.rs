@@ -20,11 +20,9 @@ pub mod auth;
 pub mod handlers;
 pub mod routes;
 
-pub use auth::{AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth, auth_middleware};
+pub use auth::{auth_middleware, AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth};
 pub use handlers::{
     health_handler, tile_handler, AppState, ErrorResponse, HealthResponse, TilePathParams,
     TileQueryParams,
 };
-pub use routes::{
-    RouterConfig, create_router, create_dev_router, create_production_router,
-};
+pub use routes::{create_dev_router, create_production_router, create_router, RouterConfig};

@@ -271,7 +271,12 @@ impl<'a, R: RangeReader> ValueReader<'a, R> {
 /// Parse an array of u64 values from raw bytes.
 ///
 /// This is useful when you already have the bytes and just need to parse them.
-pub fn parse_u64_array(bytes: &[u8], count: usize, field_type: FieldType, byte_order: ByteOrder) -> Vec<u64> {
+pub fn parse_u64_array(
+    bytes: &[u8],
+    count: usize,
+    field_type: FieldType,
+    byte_order: ByteOrder,
+) -> Vec<u64> {
     let mut values = Vec::with_capacity(count);
 
     match field_type {
@@ -306,7 +311,12 @@ pub fn parse_u64_array(bytes: &[u8], count: usize, field_type: FieldType, byte_o
 }
 
 /// Parse an array of u32 values from raw bytes.
-pub fn parse_u32_array(bytes: &[u8], count: usize, field_type: FieldType, byte_order: ByteOrder) -> Vec<u32> {
+pub fn parse_u32_array(
+    bytes: &[u8],
+    count: usize,
+    field_type: FieldType,
+    byte_order: ByteOrder,
+) -> Vec<u32> {
     let mut values = Vec::with_capacity(count);
 
     match field_type {
@@ -339,8 +349,8 @@ pub fn parse_u32_array(bytes: &[u8], count: usize, field_type: FieldType, byte_o
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::error::IoError;
+    use async_trait::async_trait;
 
     /// Mock reader for testing
     struct MockReader {

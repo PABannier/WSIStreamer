@@ -34,11 +34,7 @@
 
 use std::time::Duration;
 
-use axum::{
-    middleware,
-    routing::get,
-    Router,
-};
+use axum::{middleware, routing::get, Router};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::Method;
 use tower_http::cors::{Any, CorsLayer};
@@ -186,11 +182,7 @@ where
 }
 
 /// Build router with authentication on tile routes.
-fn build_protected_router<S>(
-    app_state: AppState<S>,
-    auth: SignedUrlAuth,
-    cors: CorsLayer,
-) -> Router
+fn build_protected_router<S>(app_state: AppState<S>, auth: SignedUrlAuth, cors: CorsLayer) -> Router
 where
     S: SlideSource + 'static,
 {
@@ -202,16 +194,16 @@ where
         .with_state(app_state.clone());
 
     // Create nested tiles router with auth applied AFTER nesting
-    let protected_tiles = Router::new()
-        .nest("/tiles", tile_routes)
-        .layer(middleware::from_fn_with_state(
-            auth,
-            super::auth::auth_middleware,
-        ));
+    let protected_tiles =
+        Router::new()
+            .nest("/tiles", tile_routes)
+            .layer(middleware::from_fn_with_state(
+                auth,
+                super::auth::auth_middleware,
+            ));
 
     // Public routes (no auth required)
-    let public_routes = Router::new()
-        .route("/health", get(health_handler));
+    let public_routes = Router::new().route("/health", get(health_handler));
 
     // Combine routes
     Router::new()
@@ -252,10 +244,7 @@ fn build_cors_layer(config: &RouterConfig) -> CorsLayer {
         }
         Some(origins) => {
             // Parse origins into HeaderValues
-            let parsed_origins: Vec<_> = origins
-                .iter()
-                .filter_map(|o| o.parse().ok())
-                .collect();
+            let parsed_origins: Vec<_> = origins.iter().filter_map(|o| o.parse().ok()).collect();
             cors.allow_origin(parsed_origins)
         }
     }
@@ -354,11 +343,10 @@ mod tests {
 
     #[test]
     fn test_build_cors_layer_specific_origins() {
-        let config = RouterConfig::new("secret")
-            .with_cors_origins(vec![
-                "https://example.com".to_string(),
-                "https://other.com".to_string(),
-            ]);
+        let config = RouterConfig::new("secret").with_cors_origins(vec![
+            "https://example.com".to_string(),
+            "https://other.com".to_string(),
+        ]);
         let _cors = build_cors_layer(&config);
         // Just verify it doesn't panic
     }

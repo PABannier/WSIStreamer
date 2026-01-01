@@ -249,7 +249,9 @@ impl SvsReader {
 
     /// Get dimensions of a specific level.
     pub fn level_dimensions(&self, level: usize) -> Option<(u32, u32)> {
-        self.levels.get(level).map(|l| (l.level.width, l.level.height))
+        self.levels
+            .get(level)
+            .map(|l| (l.level.width, l.level.height))
     }
 
     /// Get the downsample factor for a level.
@@ -364,7 +366,9 @@ impl SlideReader for SvsReader {
     }
 
     fn level_dimensions(&self, level: usize) -> Option<(u32, u32)> {
-        self.levels.get(level).map(|l| (l.level.width, l.level.height))
+        self.levels
+            .get(level)
+            .map(|l| (l.level.width, l.level.height))
     }
 
     fn level_downsample(&self, level: usize) -> Option<f64> {
@@ -438,8 +442,14 @@ mod tests {
         assert_eq!(metadata.vendor, Some("Aperio".to_string()));
         assert!((metadata.mpp.unwrap() - 0.25).abs() < 0.001);
         assert!((metadata.magnification.unwrap() - 40.0).abs() < 0.1);
-        assert_eq!(metadata.properties.get("Filename"), Some(&"test.svs".to_string()));
-        assert_eq!(metadata.properties.get("StripeWidth"), Some(&"2040".to_string()));
+        assert_eq!(
+            metadata.properties.get("Filename"),
+            Some(&"test.svs".to_string())
+        );
+        assert_eq!(
+            metadata.properties.get("StripeWidth"),
+            Some(&"2040".to_string())
+        );
     }
 
     #[test]
