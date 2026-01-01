@@ -243,8 +243,8 @@ impl TiffTag {
 
 /// TIFF compression scheme identifiers.
 ///
-/// We only support JPEG compression (value 7). Other compression schemes
-/// will result in HTTP 415 Unsupported Media Type.
+/// We support JPEG (value 7) and JPEG 2000 (value 33003) compression.
+/// Other compression schemes will result in HTTP 415 Unsupported Media Type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum Compression {
@@ -266,7 +266,7 @@ pub enum Compression {
     /// Adobe Deflate (not supported)
     AdobeDeflate = 32946,
 
-    /// JPEG 2000 (not supported)
+    /// JPEG 2000 (supported)
     Jpeg2000 = 33003,
 }
 
@@ -290,7 +290,7 @@ impl Compression {
     /// Check if this compression scheme is supported.
     #[inline]
     pub const fn is_supported(self) -> bool {
-        matches!(self, Compression::Jpeg)
+        matches!(self, Compression::Jpeg | Compression::Jpeg2000)
     }
 
     /// Get a human-readable name for the compression scheme.
@@ -427,10 +427,10 @@ mod tests {
     #[test]
     fn test_compression_is_supported() {
         assert!(Compression::Jpeg.is_supported());
+        assert!(Compression::Jpeg2000.is_supported());
         assert!(!Compression::None.is_supported());
         assert!(!Compression::Lzw.is_supported());
         assert!(!Compression::Deflate.is_supported());
-        assert!(!Compression::Jpeg2000.is_supported());
     }
 
     #[test]

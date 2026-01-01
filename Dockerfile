@@ -17,6 +17,7 @@ FROM rust:slim-bookworm AS builder
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libopenjp2-7-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -37,6 +38,7 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
+    libopenjp2-7 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -76,7 +78,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 #   WSI_AUTH_ENABLED    - Enable authentication (default: true)
 #   WSI_CACHE_SLIDES    - Max slides to cache (default: 100)
 #   WSI_CACHE_BLOCKS    - Max blocks per slide (default: 100)
-#   WSI_CACHE_TILES     - Max tiles to cache (default: 104857600)
+#   WSI_CACHE_TILES     - Tile cache size in bytes (default: 104857600 = 100MB)
 #   WSI_JPEG_QUALITY    - Default JPEG quality (default: 80)
 #   WSI_CACHE_MAX_AGE   - HTTP cache max-age seconds (default: 3600)
 #   WSI_CORS_ORIGINS    - Allowed CORS origins, comma-separated

@@ -1,7 +1,7 @@
-//! JPEG tile encoder.
+//! Tile encoder with JPEG and JPEG 2000 support.
 //!
-//! This module handles decoding source JPEG tiles and re-encoding them
-//! at a specified quality level.
+//! This module handles decoding source tiles (JPEG or JPEG 2000) and
+//! re-encoding them as JPEG at a specified quality level.
 //!
 //! # Design Decisions
 //!
@@ -13,13 +13,212 @@
 //!
 //! - **Quality control**: JPEG quality is configurable per request, allowing
 //!   clients to trade off file size vs image quality.
+//!
+//! - **Format detection**: Source format is auto-detected from magic bytes,
+//!   supporting both JPEG (FFD8) and JPEG 2000 (FF4F or JP2 container).
 
 use bytes::Bytes;
 use image::codecs::jpeg::JpegEncoder;
-use image::ImageReader;
+use image::{DynamicImage, ImageReader};
+use jpeg2k::Image as J2kImage;
 use std::io::Cursor;
 
 use crate::error::TileError;
+
+// =============================================================================
+// Format Detection
+// =============================================================================
+
+/// Detected tile format based on magic bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TileFormat {
+    /// JPEG format (FFD8 magic)
+    Jpeg,
+    /// JPEG 2000 codestream or JP2 container
+    Jpeg2000,
+    /// Unknown format
+    Unknown,
+}
+
+/// Detect the format of tile data from its magic bytes.
+///
+/// # Arguments
+/// * `data` - Raw tile bytes
+///
+/// # Returns
+/// The detected format, or `Unknown` if not recognized.
+fn detect_tile_format(data: &[u8]) -> TileFormat {
+    if data.len() < 2 {
+        return TileFormat::Unknown;
+    }
+
+    // JPEG: SOI marker (FF D8)
+    if data[0] == 0xFF && data[1] == 0xD8 {
+        return TileFormat::Jpeg;
+    }
+
+    // JPEG 2000 codestream: SOC + SIZ markers (FF 4F FF 51)
+    if data.len() >= 4 && data[0..4] == [0xFF, 0x4F, 0xFF, 0x51] {
+        return TileFormat::Jpeg2000;
+    }
+
+    // JPEG 2000 JP2 container: signature box
+    // Box length (4 bytes) + "jP  " signature
+    if data.len() >= 12 && &data[4..8] == b"jP  " {
+        return TileFormat::Jpeg2000;
+    }
+
+    TileFormat::Unknown
+}
+
+/// Decode JPEG 2000 data to a DynamicImage.
+///
+/// # Arguments
+/// * `data` - Raw JPEG 2000 bytes (codestream or JP2 container)
+///
+/// # Returns
+/// Decoded image, or error if decoding fails.
+fn decode_jpeg2000(data: &[u8]) -> Result<DynamicImage, TileError> {
+    let j2k_image = J2kImage::from_bytes(data).map_err(|e| TileError::DecodeError {
+        message: format!("JPEG 2000 decode error: {}", e),
+    })?;
+
+    // First, try the standard TryFrom conversion which handles color space
+    // conversion properly for most images. Wrap in catch_unwind to handle
+    // the rare panic case in the jpeg2k crate.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        DynamicImage::try_from(&j2k_image)
+    }));
+
+    match result {
+        Ok(Ok(img)) => Ok(img),
+        Ok(Err(e)) => Err(TileError::DecodeError {
+            message: format!("JPEG 2000 to DynamicImage conversion error: {}", e),
+        }),
+        Err(_) => {
+            // TryFrom panicked - fall back to manual conversion using components
+            decode_jpeg2000_manual(&j2k_image)
+        }
+    }
+}
+
+/// Manual JPEG 2000 decoding fallback for when TryFrom panics.
+///
+/// This handles YCbCr 4:2:0 subsampled images by manually upsampling
+/// and converting to RGB.
+fn decode_jpeg2000_manual(j2k_image: &J2kImage) -> Result<DynamicImage, TileError> {
+    let num_components = j2k_image.num_components();
+    let components = j2k_image.components();
+
+    if components.is_empty() {
+        return Err(TileError::DecodeError {
+            message: "JPEG 2000 image has no components".to_string(),
+        });
+    }
+
+    match num_components {
+        1 => {
+            // Grayscale - use first component directly
+            let comp = &components[0];
+            let comp_data = comp.data();
+            let comp_width = comp.width();
+            let comp_height = comp.height();
+
+            // Convert i32 to u8
+            let pixels: Vec<u8> = comp_data.iter().map(|&v| v.clamp(0, 255) as u8).collect();
+
+            image::GrayImage::from_raw(comp_width, comp_height, pixels)
+                .map(DynamicImage::ImageLuma8)
+                .ok_or_else(|| TileError::DecodeError {
+                    message: format!(
+                        "Failed to create grayscale image from components: {}x{}",
+                        comp_width, comp_height
+                    ),
+                })
+        }
+        3 => {
+            // RGB or YCbCr - check for subsampling and handle accordingly
+            let y_comp = &components[0];
+            let cb_comp = &components[1];
+            let cr_comp = &components[2];
+
+            // Check if chroma is subsampled
+            let y_width = y_comp.width();
+            let y_height = y_comp.height();
+            let cb_width = cb_comp.width();
+            let cb_height = cb_comp.height();
+
+            if cb_width == y_width && cb_height == y_height {
+                // No subsampling - direct RGB conversion
+                let y_data = y_comp.data();
+                let cb_data = cb_comp.data();
+                let cr_data = cr_comp.data();
+
+                let mut pixels = Vec::with_capacity((y_width * y_height * 3) as usize);
+                for i in 0..(y_width * y_height) as usize {
+                    pixels.push(y_data[i].clamp(0, 255) as u8);
+                    pixels.push(cb_data[i].clamp(0, 255) as u8);
+                    pixels.push(cr_data[i].clamp(0, 255) as u8);
+                }
+
+                image::RgbImage::from_raw(y_width, y_height, pixels)
+                    .map(DynamicImage::ImageRgb8)
+                    .ok_or_else(|| TileError::DecodeError {
+                        message: format!(
+                            "Failed to create RGB image from components: {}x{}",
+                            y_width, y_height
+                        ),
+                    })
+            } else {
+                // Chroma subsampling detected - need to upsample and convert YCbCr to RGB
+                let y_data = y_comp.data();
+                let cb_data = cb_comp.data();
+                let cr_data = cr_comp.data();
+
+                let mut pixels = Vec::with_capacity((y_width * y_height * 3) as usize);
+
+                for y_row in 0..y_height {
+                    for y_col in 0..y_width {
+                        let y_idx = (y_row * y_width + y_col) as usize;
+
+                        // Map Y coordinate to subsampled Cb/Cr coordinate
+                        let cb_col = (y_col * cb_width) / y_width;
+                        let cb_row = (y_row * cb_height) / y_height;
+                        let cb_idx = (cb_row * cb_width + cb_col) as usize;
+
+                        let y_val = y_data[y_idx] as f32;
+                        let cb_val = cb_data.get(cb_idx).copied().unwrap_or(128) as f32 - 128.0;
+                        let cr_val = cr_data.get(cb_idx).copied().unwrap_or(128) as f32 - 128.0;
+
+                        // YCbCr to RGB conversion (ITU-R BT.601)
+                        let r = (y_val + 1.402 * cr_val).clamp(0.0, 255.0) as u8;
+                        let g = (y_val - 0.344136 * cb_val - 0.714136 * cr_val).clamp(0.0, 255.0) as u8;
+                        let b = (y_val + 1.772 * cb_val).clamp(0.0, 255.0) as u8;
+
+                        pixels.push(r);
+                        pixels.push(g);
+                        pixels.push(b);
+                    }
+                }
+
+                image::RgbImage::from_raw(y_width, y_height, pixels)
+                    .map(DynamicImage::ImageRgb8)
+                    .ok_or_else(|| TileError::DecodeError {
+                        message: format!(
+                            "Failed to create RGB image from YCbCr components: {}x{}",
+                            y_width, y_height
+                        ),
+                    })
+            }
+        }
+        _ => Err(TileError::DecodeError {
+            message: format!(
+                "Unsupported JPEG 2000 component count: {} (expected 1 or 3)",
+                num_components
+            ),
+        }),
+    }
+}
 
 /// Default JPEG quality (1-100).
 pub const DEFAULT_JPEG_QUALITY: u8 = 80;
@@ -65,11 +264,14 @@ impl JpegTileEncoder {
         Self {}
     }
 
-    /// Decode source JPEG and re-encode at the specified quality.
+    /// Decode source tile and re-encode at the specified quality.
+    ///
+    /// This method auto-detects the source format (JPEG or JPEG 2000) and
+    /// decodes accordingly. Output is always JPEG.
     ///
     /// # Arguments
     ///
-    /// * `source` - Raw JPEG data from the slide tile
+    /// * `source` - Raw tile data (JPEG or JPEG 2000)
     /// * `quality` - Output JPEG quality (1-100)
     ///
     /// # Returns
@@ -79,20 +281,31 @@ impl JpegTileEncoder {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The source data is not valid JPEG
+    /// - The source data format is not recognized
     /// - Decoding fails
     /// - Encoding fails
     pub fn encode(&self, source: &[u8], quality: u8) -> Result<Bytes, TileError> {
         // Clamp quality to valid range
         let quality = quality.clamp(MIN_JPEG_QUALITY, MAX_JPEG_QUALITY);
 
-        // Decode source JPEG
-        let cursor = Cursor::new(source);
-        let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+        // Detect source format and decode
+        let format = detect_tile_format(source);
 
-        let img = reader.decode().map_err(|e| TileError::DecodeError {
-            message: e.to_string(),
-        })?;
+        let img = match format {
+            TileFormat::Jpeg => {
+                let cursor = Cursor::new(source);
+                let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+                reader.decode().map_err(|e| TileError::DecodeError {
+                    message: format!("JPEG decode error: {}", e),
+                })?
+            }
+            TileFormat::Jpeg2000 => decode_jpeg2000(source)?,
+            TileFormat::Unknown => {
+                return Err(TileError::DecodeError {
+                    message: "Unknown tile format: expected JPEG or JPEG 2000".to_string(),
+                });
+            }
+        };
 
         // Encode to JPEG at requested quality
         let mut output = Vec::new();
@@ -114,22 +327,37 @@ impl JpegTileEncoder {
         self.encode(source, DEFAULT_JPEG_QUALITY)
     }
 
-    /// Get image dimensions without fully decoding.
+    /// Get image dimensions without fully decoding (when possible).
     ///
     /// This is useful for validation or metadata queries.
+    ///
+    /// Note: For JPEG 2000, this currently requires a full decode.
     ///
     /// # Returns
     ///
     /// `(width, height)` in pixels.
     pub fn dimensions(&self, source: &[u8]) -> Result<(u32, u32), TileError> {
-        let cursor = Cursor::new(source);
-        let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+        let format = detect_tile_format(source);
 
-        let (width, height) = reader.into_dimensions().map_err(|e| TileError::DecodeError {
-            message: e.to_string(),
-        })?;
-
-        Ok((width, height))
+        match format {
+            TileFormat::Jpeg => {
+                let cursor = Cursor::new(source);
+                let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+                reader.into_dimensions().map_err(|e| TileError::DecodeError {
+                    message: format!("JPEG dimensions error: {}", e),
+                })
+            }
+            TileFormat::Jpeg2000 => {
+                // jpeg2k requires full decode to get dimensions
+                let j2k = J2kImage::from_bytes(source).map_err(|e| TileError::DecodeError {
+                    message: format!("JPEG 2000 decode error: {}", e),
+                })?;
+                Ok((j2k.width(), j2k.height()))
+            }
+            TileFormat::Unknown => Err(TileError::DecodeError {
+                message: "Unknown tile format: expected JPEG or JPEG 2000".to_string(),
+            }),
+        }
     }
 }
 
@@ -311,5 +539,65 @@ mod tests {
         // Verify we can decode the output
         let result = encoder.dimensions(&output);
         assert!(result.is_ok());
+    }
+
+    // -------------------------------------------------------------------------
+    // Format Detection Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_detect_jpeg_format() {
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        assert_eq!(detect_tile_format(&jpeg), TileFormat::Jpeg);
+    }
+
+    #[test]
+    fn test_detect_j2k_codestream_format() {
+        // JPEG 2000 codestream: SOC + SIZ markers
+        let j2k = [0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x00];
+        assert_eq!(detect_tile_format(&j2k), TileFormat::Jpeg2000);
+    }
+
+    #[test]
+    fn test_detect_jp2_container_format() {
+        // JP2 container with signature box
+        let jp2 = [
+            0x00, 0x00, 0x00, 0x0C, // Box length
+            0x6A, 0x50, 0x20, 0x20, // "jP  " signature
+            0x0D, 0x0A, 0x87, 0x0A, // Additional signature bytes
+        ];
+        assert_eq!(detect_tile_format(&jp2), TileFormat::Jpeg2000);
+    }
+
+    #[test]
+    fn test_detect_unknown_format() {
+        let unknown = [0x00, 0x00, 0x00, 0x00];
+        assert_eq!(detect_tile_format(&unknown), TileFormat::Unknown);
+    }
+
+    #[test]
+    fn test_detect_empty_data() {
+        assert_eq!(detect_tile_format(&[]), TileFormat::Unknown);
+    }
+
+    #[test]
+    fn test_detect_short_data() {
+        assert_eq!(detect_tile_format(&[0xFF]), TileFormat::Unknown);
+    }
+
+    #[test]
+    fn test_encode_unknown_format_returns_error() {
+        let encoder = JpegTileEncoder::new();
+        let unknown = vec![0x00, 0x01, 0x02, 0x03];
+
+        let result = encoder.encode(&unknown, 80);
+        assert!(result.is_err());
+
+        match result {
+            Err(TileError::DecodeError { message }) => {
+                assert!(message.contains("Unknown tile format"));
+            }
+            _ => panic!("Expected DecodeError with format message"),
+        }
     }
 }

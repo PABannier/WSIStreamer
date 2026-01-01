@@ -31,6 +31,10 @@ hex = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# JPEG 2000 support
+jpeg2k = "0.8"
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
