@@ -67,7 +67,7 @@ services:
       # Cache configuration
       WSI_CACHE_SLIDES: "50"
       WSI_CACHE_BLOCKS: "100"
-      WSI_CACHE_TILES: "1000"
+      WSI_CACHE_TILES: "104857600"  # 100MB tile cache
 
       # JPEG quality
       WSI_JPEG_QUALITY: "80"

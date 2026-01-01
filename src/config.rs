@@ -31,7 +31,7 @@
 //! - `WSI_AUTH_ENABLED` - Enable authentication (default: true)
 //! - `WSI_CACHE_SLIDES` - Max slides to cache (default: 100)
 //! - `WSI_CACHE_BLOCKS` - Max blocks per slide (default: 100)
-//! - `WSI_CACHE_TILES` - Max tiles to cache (default: 1000)
+//! - `WSI_CACHE_TILES` - Tile cache size in bytes (default: 100MB)
 //! - `WSI_JPEG_QUALITY` - Default JPEG quality (default: 80)
 //! - `WSI_CACHE_MAX_AGE` - HTTP cache max-age seconds (default: 3600)
 
@@ -129,7 +129,7 @@ pub struct Config {
     #[arg(long, default_value_t = DEFAULT_BLOCK_CACHE_CAPACITY, env = "WSI_CACHE_BLOCKS")]
     pub cache_blocks: usize,
 
-    /// Maximum number of encoded tiles to cache.
+    /// Maximum tile cache size in bytes (default: 100MB).
     #[arg(long, default_value_t = DEFAULT_TILE_CACHE_CAPACITY, env = "WSI_CACHE_TILES")]
     pub cache_tiles: usize,
 
