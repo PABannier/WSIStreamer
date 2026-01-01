@@ -107,8 +107,6 @@ fn decode_jpeg2000(data: &[u8]) -> Result<DynamicImage, TileError> {
 /// This handles YCbCr 4:2:0 subsampled images by manually upsampling
 /// and converting to RGB.
 fn decode_jpeg2000_manual(j2k_image: &J2kImage) -> Result<DynamicImage, TileError> {
-    let width = j2k_image.width();
-    let height = j2k_image.height();
     let num_components = j2k_image.num_components();
     let components = j2k_image.components();
 
