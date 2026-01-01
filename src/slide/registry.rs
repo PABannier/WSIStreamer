@@ -54,6 +54,15 @@ const DEFAULT_BLOCK_CACHE_CAPACITY: usize = 100;
 // SlideSource Trait
 // =============================================================================
 
+/// Result of listing slides from storage.
+#[derive(Debug, Clone)]
+pub struct SlideListResult {
+    /// List of slide paths/keys.
+    pub slides: Vec<String>,
+    /// Continuation token for pagination (None if no more results).
+    pub next_cursor: Option<String>,
+}
+
 /// Trait for creating range readers from slide identifiers.
 ///
 /// This abstraction allows the registry to work with different storage backends
@@ -71,6 +80,28 @@ pub trait SlideSource: Send + Sync {
     /// # Returns
     /// A range reader for accessing the slide's bytes.
     async fn create_reader(&self, slide_id: &str) -> Result<Self::Reader, IoError>;
+
+    /// List available slides from the storage backend.
+    ///
+    /// This method returns slide paths/keys that can be used to access slides.
+    /// The default implementation returns an empty list.
+    ///
+    /// # Arguments
+    /// * `limit` - Maximum number of slides to return
+    /// * `cursor` - Continuation token for pagination (from previous response)
+    ///
+    /// # Returns
+    /// A list of slide paths and optional continuation token.
+    async fn list_slides(
+        &self,
+        _limit: u32,
+        _cursor: Option<&str>,
+    ) -> Result<SlideListResult, IoError> {
+        Ok(SlideListResult {
+            slides: vec![],
+            next_cursor: None,
+        })
+    }
 }
 
 // =============================================================================
@@ -404,6 +435,13 @@ impl<S: SlideSource> SlideRegistry<S> {
     pub async fn cached_count(&self) -> usize {
         let cache = self.cache.read().await;
         cache.len()
+    }
+
+    /// Get a reference to the underlying slide source.
+    ///
+    /// This can be used to access source-specific functionality like listing slides.
+    pub fn source(&self) -> &S {
+        &self.source
     }
 }
 

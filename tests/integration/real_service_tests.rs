@@ -756,3 +756,154 @@ async fn test_slide_not_found_error() {
         error_type
     );
 }
+
+// =============================================================================
+// Slides Listing Tests
+// =============================================================================
+
+#[tokio::test]
+#[ignore]
+async fn test_slides_list_with_real_s3() {
+    // Check prerequisites
+    skip_if!(!is_minio_available().await, "MinIO is not available");
+    skip_if!(!is_server_available().await, "Server is not available");
+
+    let svs_path = match get_svs_path() {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "SKIPPED: {} environment variable not set. Set it to the path of a test SVS file.",
+                SVS_PATH_ENV
+            );
+            return;
+        }
+    };
+
+    skip_if!(
+        !Path::new(&svs_path).exists(),
+        format!("SVS file not found at: {}", svs_path)
+    );
+
+    // Create MinIO client
+    let minio_client = create_minio_client().await;
+
+    // Upload the SVS file to MinIO if it doesn't exist
+    if !slide_exists_in_minio(&minio_client, TEST_SLIDE_ID).await {
+        println!("Uploading SVS file to MinIO...");
+        let svs_data = std::fs::read(&svs_path).expect("Failed to read SVS file");
+        println!("SVS file size: {} bytes", svs_data.len());
+
+        upload_to_minio(&minio_client, TEST_SLIDE_ID, svs_data)
+            .await
+            .expect("Failed to upload SVS file to MinIO");
+        println!("Upload complete.");
+    }
+
+    // Create HTTP client for server requests
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Request the slides list
+    let slides_url = format!("{}/slides", SERVER_URL);
+    println!("Requesting slides list: {}", slides_url);
+
+    let response = http_client
+        .get(&slides_url)
+        .send()
+        .await
+        .expect("Failed to send slides list request");
+
+    let status = response.status();
+    assert!(
+        status.is_success(),
+        "Slides list request failed with status: {}",
+        status
+    );
+
+    let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
+    println!("Slides response: {:?}", body);
+
+    // Verify response structure
+    assert!(body.get("slides").is_some(), "Response should have 'slides' field");
+    let slides = body["slides"].as_array().expect("slides should be an array");
+
+    // Our test slide should be in the list
+    let slide_names: Vec<&str> = slides.iter().filter_map(|s| s.as_str()).collect();
+    println!("Found {} slides: {:?}", slide_names.len(), slide_names);
+
+    assert!(
+        slide_names.contains(&TEST_SLIDE_ID),
+        "Test slide '{}' should be in the slides list",
+        TEST_SLIDE_ID
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_slides_list_pagination_with_real_s3() {
+    // Check prerequisites
+    skip_if!(!is_minio_available().await, "MinIO is not available");
+    skip_if!(!is_server_available().await, "Server is not available");
+
+    let svs_path = match get_svs_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("SKIPPED: {} environment variable not set.", SVS_PATH_ENV);
+            return;
+        }
+    };
+
+    skip_if!(!Path::new(&svs_path).exists(), "SVS file not found");
+
+    // Create MinIO client
+    let minio_client = create_minio_client().await;
+
+    // Upload multiple test slides
+    let svs_data = std::fs::read(&svs_path).expect("Failed to read SVS file");
+
+    let test_slides = ["test-slide-1.svs", "test-slide-2.svs", "test-slide-3.svs"];
+    for slide_id in &test_slides {
+        if !slide_exists_in_minio(&minio_client, slide_id).await {
+            println!("Uploading {} to MinIO...", slide_id);
+            upload_to_minio(&minio_client, slide_id, svs_data.clone())
+                .await
+                .expect("Failed to upload slide");
+        }
+    }
+
+    // Create HTTP client
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Request with limit=2
+    let slides_url = format!("{}/slides?limit=2", SERVER_URL);
+    println!("Requesting slides with limit=2: {}", slides_url);
+
+    let response = http_client
+        .get(&slides_url)
+        .send()
+        .await
+        .expect("Failed to send slides list request");
+
+    assert!(response.status().is_success());
+
+    let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
+    println!("Response: {:?}", body);
+
+    let slides = body["slides"].as_array().expect("slides should be an array");
+    assert!(
+        slides.len() <= 2,
+        "Should return at most 2 slides, got {}",
+        slides.len()
+    );
+
+    // If there are more slides, next_cursor should be present
+    // (This depends on how many slides are actually in the bucket)
+    if body.get("next_cursor").is_some() {
+        println!("Pagination cursor present: {}", body["next_cursor"]);
+    }
+}

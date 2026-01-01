@@ -115,6 +115,30 @@ fn default_quality() -> u8 {
     DEFAULT_JPEG_QUALITY
 }
 
+/// Query parameters for the slides list endpoint.
+#[derive(Debug, Deserialize)]
+pub struct SlidesQueryParams {
+    /// Maximum number of slides to return (default: 100, max: 1000)
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+
+    /// Continuation token for pagination (from previous response)
+    #[serde(default)]
+    pub cursor: Option<String>,
+
+    /// Signature for authentication (handled by auth middleware)
+    #[serde(default)]
+    pub sig: Option<String>,
+
+    /// Expiry timestamp for authentication (handled by auth middleware)
+    #[serde(default)]
+    pub exp: Option<u64>,
+}
+
+fn default_limit() -> u32 {
+    100
+}
+
 // =============================================================================
 // Response Types
 // =============================================================================
@@ -165,6 +189,17 @@ pub struct HealthResponse {
 
     /// Service version
     pub version: String,
+}
+
+/// Response from the slides list endpoint.
+#[derive(Debug, Serialize)]
+pub struct SlidesResponse {
+    /// List of slide paths/IDs
+    pub slides: Vec<String>,
+
+    /// Continuation token for next page (None if no more pages)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 // =============================================================================
@@ -414,6 +449,62 @@ impl From<TileError> for HandlerError {
     }
 }
 
+/// Wrapper for slides listing errors to implement IntoResponse.
+pub struct SlidesError(pub IoError);
+
+impl IntoResponse for SlidesError {
+    fn into_response(self) -> Response {
+        let (status, error_type, message) = match &self.0 {
+            IoError::NotFound(path) => (
+                StatusCode::NOT_FOUND,
+                "not_found",
+                format!("Resource not found: {}", path),
+            ),
+            IoError::S3(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage_error",
+                format!("Storage error: {}", msg),
+            ),
+            IoError::Connection(msg) => (
+                StatusCode::BAD_GATEWAY,
+                "connection_error",
+                format!("Connection error: {}", msg),
+            ),
+            IoError::RangeOutOfBounds { .. } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "io_error",
+                format!("I/O error: {}", self.0),
+            ),
+        };
+
+        // Log based on severity
+        if status.is_server_error() {
+            error!(
+                error_type = error_type,
+                status = status.as_u16(),
+                "Server error: {}",
+                message
+            );
+        } else {
+            debug!(
+                error_type = error_type,
+                status = status.as_u16(),
+                "Client error: {}",
+                message
+            );
+        }
+
+        let error_response = ErrorResponse::with_status(error_type, message, status);
+        (status, Json(error_response)).into_response()
+    }
+}
+
+impl From<IoError> for SlidesError {
+    fn from(err: IoError) -> Self {
+        SlidesError(err)
+    }
+}
+
 // =============================================================================
 // Handlers
 // =============================================================================
@@ -514,6 +605,54 @@ pub async fn health_handler() -> Json<HealthResponse> {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+/// Handle slides list requests.
+///
+/// # Endpoint
+///
+/// `GET /slides`
+///
+/// # Query Parameters
+///
+/// - `limit`: Maximum number of slides to return (default: 100, max: 1000)
+/// - `cursor`: Continuation token for pagination (from previous response)
+/// - `sig`: Authentication signature (for signed URLs)
+/// - `exp`: Signature expiry timestamp (for signed URLs)
+///
+/// # Response
+///
+/// `200 OK` with JSON body:
+/// ```json
+/// {
+///   "slides": ["path/to/slide1.svs", "path/to/slide2.tif"],
+///   "next_cursor": "continuation_token_or_null"
+/// }
+/// ```
+///
+/// # Errors
+///
+/// - `401 Unauthorized`: Invalid or missing signature
+/// - `500 Internal Server Error`: Storage error
+pub async fn slides_handler<S: SlideSource>(
+    State(state): State<AppState<S>>,
+    Query(query): Query<SlidesQueryParams>,
+) -> Result<Json<SlidesResponse>, SlidesError> {
+    // Clamp limit to valid range (1-1000)
+    let limit = query.limit.clamp(1, 1000);
+
+    // List slides from the source
+    let result = state
+        .tile_service
+        .registry()
+        .source()
+        .list_slides(limit, query.cursor.as_deref())
+        .await?;
+
+    Ok(Json(SlidesResponse {
+        slides: result.slides,
+        next_cursor: result.next_cursor,
+    }))
 }
 
 // =============================================================================
@@ -683,5 +822,66 @@ mod tests {
         let err = TileError::Io(IoError::Connection("reset by peer".to_string()));
         let response = err.into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_slides_query_params_defaults() {
+        let params: SlidesQueryParams = serde_json::from_str("{}").unwrap();
+        assert_eq!(params.limit, 100);
+        assert!(params.cursor.is_none());
+        assert!(params.sig.is_none());
+        assert!(params.exp.is_none());
+    }
+
+    #[test]
+    fn test_slides_query_params_with_values() {
+        let params: SlidesQueryParams = serde_json::from_str(
+            r#"{"limit": 50, "cursor": "token123", "sig": "abc", "exp": 1234567890}"#,
+        )
+        .unwrap();
+        assert_eq!(params.limit, 50);
+        assert_eq!(params.cursor, Some("token123".to_string()));
+        assert_eq!(params.sig, Some("abc".to_string()));
+        assert_eq!(params.exp, Some(1234567890));
+    }
+
+    #[test]
+    fn test_slides_response_serialization() {
+        let response = SlidesResponse {
+            slides: vec!["slide1.svs".to_string(), "folder/slide2.tif".to_string()],
+            next_cursor: Some("token123".to_string()),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("slide1.svs"));
+        assert!(json.contains("folder/slide2.tif"));
+        assert!(json.contains("token123"));
+    }
+
+    #[test]
+    fn test_slides_response_no_cursor() {
+        let response = SlidesResponse {
+            slides: vec!["slide.svs".to_string()],
+            next_cursor: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(!json.contains("next_cursor"));
+    }
+
+    #[test]
+    fn test_slides_error_to_status_code() {
+        // Test NotFound -> 404
+        let err = SlidesError(IoError::NotFound("bucket/slide.svs".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Test S3 -> 500
+        let err = SlidesError(IoError::S3("access denied".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Test Connection -> 502
+        let err = SlidesError(IoError::Connection("timeout".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     }
 }

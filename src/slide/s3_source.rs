@@ -9,7 +9,22 @@ use aws_sdk_s3::Client;
 use crate::error::IoError;
 use crate::io::S3RangeReader;
 
-use super::SlideSource;
+use super::{SlideListResult, SlideSource};
+
+// =============================================================================
+// Slide Extension Filtering
+// =============================================================================
+
+/// Supported slide file extensions (case-insensitive).
+const SLIDE_EXTENSIONS: &[&str] = &[".svs", ".tif", ".tiff"];
+
+/// Check if a file path has a supported slide extension.
+fn is_slide_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    SLIDE_EXTENSIONS
+        .iter()
+        .any(|ext| path_lower.ends_with(ext))
+}
 
 /// S3-backed implementation of `SlideSource`.
 ///
@@ -57,6 +72,40 @@ impl SlideSource for S3SlideSource {
     async fn create_reader(&self, slide_id: &str) -> Result<Self::Reader, IoError> {
         S3RangeReader::new(self.client.clone(), self.bucket.clone(), slide_id.to_string()).await
     }
+
+    async fn list_slides(
+        &self,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<SlideListResult, IoError> {
+        let mut request = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .max_keys(limit as i32);
+
+        if let Some(token) = cursor {
+            request = request.continuation_token(token);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| IoError::S3(e.to_string()))?;
+
+        let slides: Vec<String> = response
+            .contents()
+            .iter()
+            .filter_map(|obj| obj.key())
+            .filter(|key| is_slide_file(key))
+            .map(|s| s.to_string())
+            .collect();
+
+        Ok(SlideListResult {
+            slides,
+            next_cursor: response.next_continuation_token().map(|s| s.to_string()),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -74,5 +123,37 @@ mod tests {
         );
         let source = S3SlideSource::new(client, "test-bucket".to_string());
         assert_eq!(source.bucket(), "test-bucket");
+    }
+
+    #[test]
+    fn test_is_slide_file_svs() {
+        assert!(is_slide_file("slide.svs"));
+        assert!(is_slide_file("path/to/slide.svs"));
+        assert!(is_slide_file("SLIDE.SVS"));
+        assert!(is_slide_file("path/to/SLIDE.Svs"));
+    }
+
+    #[test]
+    fn test_is_slide_file_tif() {
+        assert!(is_slide_file("slide.tif"));
+        assert!(is_slide_file("path/to/slide.tif"));
+        assert!(is_slide_file("SLIDE.TIF"));
+    }
+
+    #[test]
+    fn test_is_slide_file_tiff() {
+        assert!(is_slide_file("slide.tiff"));
+        assert!(is_slide_file("path/to/slide.tiff"));
+        assert!(is_slide_file("SLIDE.TIFF"));
+    }
+
+    #[test]
+    fn test_is_slide_file_non_slide() {
+        assert!(!is_slide_file("image.jpg"));
+        assert!(!is_slide_file("document.pdf"));
+        assert!(!is_slide_file("slide.svs.backup"));
+        assert!(!is_slide_file("slide_svs"));
+        assert!(!is_slide_file(""));
+        assert!(!is_slide_file("no_extension"));
     }
 }
