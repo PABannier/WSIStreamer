@@ -1,10 +1,14 @@
 # WSI Streamer
 
-![WSI Streamer Banner](./assets/banner.png)
+[![CICD](https://github.com/PABannier/WSIStreamer/actions/workflows/test.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/test.yml/badge.svg)
 
 WSI Streamer is a tile server for Whole Slide Images (WSI) stored in S3-compatible object storage. It serves tiles on-demand using HTTP range requests, so you never have to download or mount multi-gigabyte slides on local disk.
 
+![WSI Streamer Banner](./assets/banner.png)
+
 Whole Slide Images are often 1-10GB+ and live in object storage. Traditional viewers expect a local filesystem and force full downloads before a single tile can be served. WSI Streamer is built for the reality of cloud-native storage: it understands the slide formats, pulls only the bytes it needs, and returns JPEG tiles immediately.
+
+[Quick Start](#quick-start) • [API](#api) • [How It Works](#how-it-works)
 
 ## Highlights
 
