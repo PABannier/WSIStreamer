@@ -1,6 +1,6 @@
 # WSI Streamer
 
-[![CICD](https://github.com/PABannier/WSIStreamer/actions/workflows/test.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/test.yml/badge.svg)
+[![CI](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)
 
 Whole Slide Images are often 1-10GB+ and live in object storage. Traditional viewers expect a local filesystem and force full downloads before a single tile can be served. WSI Streamer is built for the reality of cloud-native storage: it understands the slide formats, pulls only the bytes it needs, and returns JPEG tiles immediately.
 

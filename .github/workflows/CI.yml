@@ -35,6 +35,7 @@ jobs:
     - run: cargo clippy --all-targets --all-features -- -Dwarnings
 
   test:
+    name: Run unit tests
     runs-on: ubuntu-latest
 
     steps:
