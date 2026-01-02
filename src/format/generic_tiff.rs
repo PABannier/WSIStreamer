@@ -350,11 +350,13 @@ mod tests {
     use std::collections::HashMap;
 
     // Mock reader for testing
+    #[allow(dead_code)]
     struct MockTiffReader {
         // Simulates a minimal tiled TIFF with JPEG compression
         data: Vec<u8>,
     }
 
+    #[allow(dead_code)]
     impl MockTiffReader {
         fn new_valid_tiff() -> Self {
             // Create a minimal valid TIFF header and structure

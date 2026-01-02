@@ -40,14 +40,17 @@ impl TrackingMockReader {
         }
     }
 
+    #[allow(dead_code)]
     pub fn request_count(&self) -> usize {
         self.request_count.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     pub async fn get_requests(&self) -> Vec<(u64, usize)> {
         self.requests.read().await.clone()
     }
 
+    #[allow(dead_code)]
     pub fn reset_tracking(&self) {
         self.request_count.store(0, Ordering::SeqCst);
     }
@@ -114,6 +117,7 @@ impl MockSlideSource {
         self
     }
 
+    #[allow(dead_code)]
     pub async fn get_request_count(&self, slide_id: &str) -> usize {
         self.request_counts
             .read()
@@ -212,6 +216,7 @@ pub fn create_test_jpeg(width: u32, height: u32, quality: u8) -> Vec<u8> {
 }
 
 /// Create a test RGB JPEG image.
+#[allow(dead_code)]
 pub fn create_test_rgb_jpeg(width: u32, height: u32, quality: u8) -> Vec<u8> {
     let img = RgbImage::from_fn(width, height, |x, y| {
         let r = (x % 256) as u8;
@@ -231,6 +236,7 @@ pub fn create_test_rgb_jpeg(width: u32, height: u32, quality: u8) -> Vec<u8> {
 // =============================================================================
 
 /// Builder for creating test TIFF files.
+#[allow(dead_code)]
 pub struct TiffBuilder {
     byte_order: ByteOrderType,
     is_bigtiff: bool,
@@ -243,6 +249,7 @@ pub enum ByteOrderType {
     BigEndian,
 }
 
+#[allow(dead_code)]
 impl TiffBuilder {
     pub fn new() -> Self {
         Self {
@@ -270,11 +277,6 @@ impl TiffBuilder {
     /// Build the TIFF file data.
     pub fn build(self) -> Vec<u8> {
         let mut data = Vec::new();
-
-        // Calculate sizes and offsets
-        let header_size = if self.is_bigtiff { 16 } else { 8 };
-        let entry_size = if self.is_bigtiff { 20 } else { 12 };
-        let offset_size = if self.is_bigtiff { 8 } else { 4 };
 
         // Write header
         match self.byte_order {
@@ -306,22 +308,12 @@ impl TiffBuilder {
         }
 
         // Calculate where each IFD and its data will go
-        let mut current_offset = header_size as u64;
         let mut ifd_data_sections: Vec<(usize, Vec<u8>)> = Vec::new();
 
         for (idx, ifd) in self.ifds.iter().enumerate() {
-            let entry_count = ifd.entries.len();
-            let ifd_size = if self.is_bigtiff {
-                8 + entry_count * entry_size + 8 // entry count (8) + entries + next ifd (8)
-            } else {
-                2 + entry_count * entry_size + 4 // entry count (2) + entries + next ifd (4)
-            };
-
             // Collect external data that needs to go after the IFD
             let external_data = ifd.build_external_data(self.byte_order, self.is_bigtiff);
             ifd_data_sections.push((idx, external_data));
-
-            current_offset += ifd_size as u64;
         }
 
         // Now write the IFDs
@@ -388,6 +380,7 @@ impl Default for TiffBuilder {
 }
 
 /// Builder for creating IFD entries.
+#[allow(dead_code)]
 pub struct IfdBuilder {
     entries: Vec<IfdEntryBuilder>,
     jpeg_tile_data: Option<Vec<u8>>,
@@ -395,6 +388,7 @@ pub struct IfdBuilder {
     tile_byte_counts: Vec<u64>,
 }
 
+#[allow(dead_code)]
 impl IfdBuilder {
     pub fn new() -> Self {
         Self {
@@ -413,8 +407,8 @@ impl IfdBuilder {
         tile_height: u32,
         jpeg_data: Vec<u8>,
     ) -> Self {
-        let tiles_x = (width + tile_width - 1) / tile_width;
-        let tiles_y = (height + tile_height - 1) / tile_height;
+        let tiles_x = width.div_ceil(tile_width);
+        let tiles_y = height.div_ceil(tile_height);
         let tile_count = (tiles_x * tiles_y) as usize;
 
         let jpeg_len = jpeg_data.len();
@@ -510,6 +504,7 @@ impl IfdBuilder {
         let mut data_offset = entries_end as u64;
 
         // Write entries (sorted by tag)
+        #[allow(clippy::type_complexity)]
         let mut all_entries: Vec<(u16, u16, u32, u64, Option<&Vec<u8>>)> = self
             .entries
             .iter()
@@ -597,6 +592,7 @@ impl Default for IfdBuilder {
     }
 }
 
+#[allow(dead_code)]
 struct IfdEntryBuilder {
     tag: u16,
     field_type: u16,
@@ -605,6 +601,7 @@ struct IfdEntryBuilder {
     external_data: Option<Vec<u8>>,
 }
 
+#[allow(dead_code)]
 fn field_type_size(field_type: u16) -> usize {
     match field_type {
         1 => 1,  // BYTE
@@ -626,6 +623,7 @@ fn field_type_size(field_type: u16) -> usize {
     }
 }
 
+#[allow(dead_code)]
 fn write_value(data: &mut Vec<u8>, byte_order: ByteOrderType, value: u64, size: usize) {
     match byte_order {
         ByteOrderType::LittleEndian => match size {
@@ -717,7 +715,7 @@ pub fn create_tiff_with_jpeg_tile_endian(byte_order: ByteOrderType) -> Vec<u8> {
 
     // Helper to write IFD entry
     // For inline values, SHORT values need to be left-justified in the 4-byte value field
-    let mut write_entry =
+    let write_entry =
         |data: &mut [u8], offset: &mut usize, tag: u16, typ: u16, count: u32, value: u32| {
             write_u16(data, *offset, tag, byte_order);
             write_u16(data, *offset + 2, typ, byte_order);

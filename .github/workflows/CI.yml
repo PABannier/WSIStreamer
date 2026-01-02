@@ -10,7 +10,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check_formatting:
+    name: Ensure 'cargo fmt' has been run
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - run: cargo fmt -- --check
+
+  lint_check:
+    name: Ensure 'cargo clippy' has no warnings
+    runs-on: ubuntu-latest
+    steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - run: cargo clippy --all-targets --all-features -- -Dwarnings
+
   test:
+    name: Run unit tests
     runs-on: ubuntu-latest
 
     steps:
