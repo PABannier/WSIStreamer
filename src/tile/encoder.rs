@@ -373,7 +373,7 @@ impl JpegTileEncoder {
 /// Returns `true` if quality is in the valid range (1-100).
 #[inline]
 pub fn is_valid_quality(quality: u8) -> bool {
-    quality >= MIN_JPEG_QUALITY && quality <= MAX_JPEG_QUALITY
+    (MIN_JPEG_QUALITY..=MAX_JPEG_QUALITY).contains(&quality)
 }
 
 /// Clamp quality to valid range.
@@ -439,8 +439,8 @@ mod tests {
 
         // Higher quality should generally produce larger files
         // (though not guaranteed for all images)
-        assert!(low_quality.len() > 0);
-        assert!(high_quality.len() > 0);
+        assert!(!low_quality.is_empty());
+        assert!(!high_quality.is_empty());
     }
 
     #[test]
