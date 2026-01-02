@@ -121,8 +121,8 @@ impl PyramidLevel {
         let compression = ifd.compression(byte_order).unwrap_or(0);
 
         // Calculate tile counts
-        let tiles_x = (width + tile_width - 1) / tile_width;
-        let tiles_y = (height + tile_height - 1) / tile_height;
+        let tiles_x = width.div_ceil(tile_width);
+        let tiles_y = height.div_ceil(tile_height);
         let tile_count = tiles_x * tiles_y;
 
         // Get entries for tile offsets and byte counts
@@ -733,9 +733,9 @@ mod tests {
             height,
             tile_width: 256,
             tile_height: 256,
-            tiles_x: (width + 255) / 256,
-            tiles_y: (height + 255) / 256,
-            tile_count: ((width + 255) / 256) * ((height + 255) / 256),
+            tiles_x: width.div_ceil(256),
+            tiles_y: height.div_ceil(256),
+            tile_count: width.div_ceil(256) * height.div_ceil(256),
             downsample,
             compression: 7,
             ifd: create_mock_ifd(),
