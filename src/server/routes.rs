@@ -42,7 +42,9 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use super::auth::SignedUrlAuth;
-use super::handlers::{health_handler, slides_handler, tile_handler, AppState};
+use super::handlers::{
+    health_handler, slide_metadata_handler, slides_handler, tile_handler, AppState,
+};
 use crate::slide::SlideSource;
 use crate::tile::TileService;
 
@@ -194,9 +196,10 @@ where
         .route("/{slide_id}/{level}/{x}/{filename}", get(tile_handler::<S>))
         .with_state(app_state.clone());
 
-    // Protected slides list route (require authentication)
+    // Protected slides routes (require authentication)
     let slides_routes = Router::new()
         .route("/", get(slides_handler::<S>))
+        .route("/{slide_id}", get(slide_metadata_handler::<S>))
         .with_state(app_state.clone());
 
     // Create nested routes with auth applied AFTER nesting
@@ -232,6 +235,7 @@ where
             get(tile_handler::<S>),
         )
         .route("/slides", get(slides_handler::<S>))
+        .route("/slides/{slide_id}", get(slide_metadata_handler::<S>))
         .with_state(app_state)
         .layer(cors)
 }

@@ -202,6 +202,56 @@ pub struct SlidesResponse {
     pub next_cursor: Option<String>,
 }
 
+/// Metadata for a single pyramid level.
+#[derive(Debug, Serialize)]
+pub struct LevelMetadataResponse {
+    /// Pyramid level index (0 = highest resolution)
+    pub level: usize,
+
+    /// Width of this level in pixels
+    pub width: u32,
+
+    /// Height of this level in pixels
+    pub height: u32,
+
+    /// Width of each tile in pixels
+    pub tile_width: u32,
+
+    /// Height of each tile in pixels
+    pub tile_height: u32,
+
+    /// Number of tiles in X direction
+    pub tiles_x: u32,
+
+    /// Number of tiles in Y direction
+    pub tiles_y: u32,
+
+    /// Downsample factor relative to level 0
+    pub downsample: f64,
+}
+
+/// Response from the slide metadata endpoint.
+#[derive(Debug, Serialize)]
+pub struct SlideMetadataResponse {
+    /// Slide identifier
+    pub slide_id: String,
+
+    /// Detected slide format (e.g., "aperio_svs", "generic_tiff")
+    pub format: String,
+
+    /// Width of the full-resolution image in pixels
+    pub width: u32,
+
+    /// Height of the full-resolution image in pixels
+    pub height: u32,
+
+    /// Number of pyramid levels
+    pub level_count: usize,
+
+    /// Metadata for each pyramid level
+    pub levels: Vec<LevelMetadataResponse>,
+}
+
 // =============================================================================
 // Error Mapping
 // =============================================================================
@@ -508,6 +558,21 @@ impl From<IoError> for SlidesError {
     }
 }
 
+/// Wrapper for slide metadata errors to implement IntoResponse.
+pub struct SlideMetadataError(pub FormatError);
+
+impl IntoResponse for SlideMetadataError {
+    fn into_response(self) -> Response {
+        self.0.into_response()
+    }
+}
+
+impl From<FormatError> for SlideMetadataError {
+    fn from(err: FormatError) -> Self {
+        SlideMetadataError(err)
+    }
+}
+
 // =============================================================================
 // Handlers
 // =============================================================================
@@ -650,6 +715,84 @@ pub async fn slides_handler<S: SlideSource>(
     Ok(Json(SlidesResponse {
         slides: result.slides,
         next_cursor: result.next_cursor,
+    }))
+}
+
+/// Handle slide metadata requests.
+///
+/// # Endpoint
+///
+/// `GET /slides/{slide_id}`
+///
+/// # Path Parameters
+///
+/// - `slide_id`: Slide identifier (URL-encoded if contains special characters)
+///
+/// # Response
+///
+/// `200 OK` with JSON body containing slide metadata:
+/// ```json
+/// {
+///   "slide_id": "path/to/slide.svs",
+///   "format": "aperio_svs",
+///   "width": 46920,
+///   "height": 33600,
+///   "level_count": 4,
+///   "levels": [
+///     {
+///       "level": 0,
+///       "width": 46920,
+///       "height": 33600,
+///       "tile_width": 256,
+///       "tile_height": 256,
+///       "tiles_x": 184,
+///       "tiles_y": 132,
+///       "downsample": 1.0
+///     }
+///   ]
+/// }
+/// ```
+///
+/// # Errors
+///
+/// - `401 Unauthorized`: Invalid or missing signature (when auth enabled)
+/// - `404 Not Found`: Slide not found
+/// - `415 Unsupported Media Type`: Slide format not supported
+/// - `500 Internal Server Error`: Storage or processing error
+pub async fn slide_metadata_handler<S: SlideSource>(
+    State(state): State<AppState<S>>,
+    Path(slide_id): Path<String>,
+) -> Result<Json<SlideMetadataResponse>, SlideMetadataError> {
+    // Get slide from registry (opens and caches if needed)
+    let slide = state.tile_service.registry().get_slide(&slide_id).await?;
+
+    // Get dimensions (should always be available for valid slides)
+    let (width, height) = slide.dimensions().unwrap_or((0, 0));
+
+    // Build level metadata for each pyramid level
+    let level_count = slide.level_count();
+    let levels: Vec<LevelMetadataResponse> = (0..level_count)
+        .filter_map(|level| {
+            slide.level_info(level).map(|info| LevelMetadataResponse {
+                level,
+                width: info.width,
+                height: info.height,
+                tile_width: info.tile_width,
+                tile_height: info.tile_height,
+                tiles_x: info.tiles_x,
+                tiles_y: info.tiles_y,
+                downsample: info.downsample,
+            })
+        })
+        .collect();
+
+    Ok(Json(SlideMetadataResponse {
+        slide_id,
+        format: slide.format().name().to_string(),
+        width,
+        height,
+        level_count,
+        levels,
     }))
 }
 
@@ -881,5 +1024,105 @@ mod tests {
         let err = SlidesError(IoError::Connection("timeout".to_string()));
         let response = err.into_response();
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn test_level_metadata_response_serialization() {
+        let response = LevelMetadataResponse {
+            level: 0,
+            width: 46920,
+            height: 33600,
+            tile_width: 256,
+            tile_height: 256,
+            tiles_x: 184,
+            tiles_y: 132,
+            downsample: 1.0,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"level\":0"));
+        assert!(json.contains("\"width\":46920"));
+        assert!(json.contains("\"height\":33600"));
+        assert!(json.contains("\"tile_width\":256"));
+        assert!(json.contains("\"tile_height\":256"));
+        assert!(json.contains("\"tiles_x\":184"));
+        assert!(json.contains("\"tiles_y\":132"));
+        assert!(json.contains("\"downsample\":1.0"));
+    }
+
+    #[test]
+    fn test_slide_metadata_response_serialization() {
+        let response = SlideMetadataResponse {
+            slide_id: "path/to/slide.svs".to_string(),
+            format: "aperio_svs".to_string(),
+            width: 46920,
+            height: 33600,
+            level_count: 2,
+            levels: vec![
+                LevelMetadataResponse {
+                    level: 0,
+                    width: 46920,
+                    height: 33600,
+                    tile_width: 256,
+                    tile_height: 256,
+                    tiles_x: 184,
+                    tiles_y: 132,
+                    downsample: 1.0,
+                },
+                LevelMetadataResponse {
+                    level: 1,
+                    width: 23460,
+                    height: 16800,
+                    tile_width: 256,
+                    tile_height: 256,
+                    tiles_x: 92,
+                    tiles_y: 66,
+                    downsample: 2.0,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"slide_id\":\"path/to/slide.svs\""));
+        assert!(json.contains("\"format\":\"aperio_svs\""));
+        assert!(json.contains("\"width\":46920"));
+        assert!(json.contains("\"height\":33600"));
+        assert!(json.contains("\"level_count\":2"));
+        assert!(json.contains("\"levels\":["));
+    }
+
+    #[test]
+    fn test_slide_metadata_response_empty_levels() {
+        let response = SlideMetadataResponse {
+            slide_id: "empty.tif".to_string(),
+            format: "generic_tiff".to_string(),
+            width: 0,
+            height: 0,
+            level_count: 0,
+            levels: vec![],
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"levels\":[]"));
+        assert!(json.contains("\"level_count\":0"));
+    }
+
+    #[test]
+    fn test_slide_metadata_error_to_status_code() {
+        // Test NotFound -> 404
+        let err = SlideMetadataError(FormatError::Io(IoError::NotFound(
+            "bucket/slide.svs".to_string(),
+        )));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Test UnsupportedFormat -> 415
+        let err = SlideMetadataError(FormatError::UnsupportedFormat {
+            reason: "not a TIFF file".to_string(),
+        });
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // Test S3 error -> 500
+        let err = SlideMetadataError(FormatError::Io(IoError::S3("access denied".to_string())));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

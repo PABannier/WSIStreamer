@@ -28,9 +28,10 @@ pub use format::{
 pub use io::{create_s3_client, BlockCache, RangeReader, S3RangeReader};
 pub use server::{
     auth_middleware, create_dev_router, create_production_router, create_router, health_handler,
-    slides_handler, tile_handler, AppState, AuthError, AuthQueryParams, ErrorResponse,
-    HealthResponse, OptionalAuth, RouterConfig, SignedUrlAuth, SlidesQueryParams, SlidesResponse,
-    TilePathParams, TileQueryParams,
+    slide_metadata_handler, slides_handler, tile_handler, AppState, AuthError, AuthQueryParams,
+    ErrorResponse, HealthResponse, LevelMetadataResponse, OptionalAuth, RouterConfig,
+    SignedUrlAuth, SlideMetadataResponse, SlidesQueryParams, SlidesResponse, TilePathParams,
+    TileQueryParams,
 };
 pub use slide::{
     CachedSlide, LevelInfo, S3SlideSource, SlideListResult, SlideReader, SlideRegistry, SlideSource,
