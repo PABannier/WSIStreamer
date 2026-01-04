@@ -420,3 +420,72 @@ async fn test_slide_id_with_special_chars() {
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+// =============================================================================
+// Slide Metadata Endpoint
+// =============================================================================
+
+#[tokio::test]
+async fn test_slide_metadata_endpoint() {
+    let tiff_data = create_tiff_with_jpeg_tile();
+    let source = MockSlideSource::new().with_slide("test.tif", tiff_data);
+    let registry = SlideRegistry::new(source);
+    let tile_service = TileService::new(registry);
+    let router = create_router(tile_service, RouterConfig::without_auth());
+
+    // Request slide metadata
+    let request = Request::builder()
+        .uri("/slides/test.tif")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Parse and verify the response
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let metadata: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify required fields
+    assert_eq!(metadata["slide_id"], "test.tif");
+    assert_eq!(metadata["format"], "Generic Pyramidal TIFF");
+    assert!(metadata["width"].as_u64().unwrap() > 0);
+    assert!(metadata["height"].as_u64().unwrap() > 0);
+    assert!(metadata["level_count"].as_u64().unwrap() >= 1);
+
+    // Verify levels array
+    let levels = metadata["levels"].as_array().unwrap();
+    assert!(!levels.is_empty());
+
+    // Verify first level has all required fields
+    let level0 = &levels[0];
+    assert_eq!(level0["level"], 0);
+    assert!(level0["width"].as_u64().is_some());
+    assert!(level0["height"].as_u64().is_some());
+    assert!(level0["tile_width"].as_u64().is_some());
+    assert!(level0["tile_height"].as_u64().is_some());
+    assert!(level0["tiles_x"].as_u64().is_some());
+    assert!(level0["tiles_y"].as_u64().is_some());
+    assert!(level0["downsample"].as_f64().is_some());
+}
+
+#[tokio::test]
+async fn test_slide_metadata_not_found() {
+    let source = MockSlideSource::new(); // No slides
+    let registry = SlideRegistry::new(source);
+    let tile_service = TileService::new(registry);
+    let router = create_router(tile_service, RouterConfig::without_auth());
+
+    let request = Request::builder()
+        .uri("/slides/nonexistent.tif")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // Verify JSON error response
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"], "not_found");
+}
