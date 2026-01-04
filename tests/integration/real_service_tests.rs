@@ -940,3 +940,195 @@ async fn test_slides_list_pagination_with_real_s3() {
         println!("Pagination cursor present: {}", body["next_cursor"]);
     }
 }
+
+// =============================================================================
+// Slide Metadata Tests
+// =============================================================================
+
+#[tokio::test]
+#[ignore]
+async fn test_real_svs_slide_metadata() {
+    // Check prerequisites
+    skip_if!(!is_minio_available().await, "MinIO is not available");
+    skip_if!(!is_server_available().await, "Server is not available");
+
+    let svs_path = match get_svs_path() {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "SKIPPED: {} environment variable not set. Set it to the path of a test SVS file.",
+                SVS_PATH_ENV
+            );
+            return;
+        }
+    };
+
+    skip_if!(
+        !Path::new(&svs_path).exists(),
+        format!("SVS file not found at: {}", svs_path)
+    );
+
+    // Create MinIO client
+    let minio_client = create_minio_client().await;
+
+    // Upload the SVS file to MinIO if it doesn't exist
+    if !slide_exists_in_minio(&minio_client, TEST_SLIDE_ID).await {
+        println!("Uploading SVS file to MinIO...");
+        let svs_data = std::fs::read(&svs_path).expect("Failed to read SVS file");
+        println!("SVS file size: {} bytes", svs_data.len());
+
+        upload_to_minio(&minio_client, TEST_SLIDE_ID, svs_data)
+            .await
+            .expect("Failed to upload SVS file to MinIO");
+        println!("Upload complete.");
+    } else {
+        println!("SVS file already exists in MinIO, skipping upload.");
+    }
+
+    // Create HTTP client for server requests
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    // Request slide metadata
+    let metadata_url = format!("{}/slides/{}", SERVER_URL, TEST_SLIDE_ID);
+    println!("Requesting slide metadata: {}", metadata_url);
+
+    let response = http_client
+        .get(&metadata_url)
+        .send()
+        .await
+        .expect("Failed to send metadata request");
+
+    let status = response.status();
+    assert!(
+        status.is_success(),
+        "Slide metadata request failed with status: {}",
+        status
+    );
+
+    let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
+    println!("Slide metadata response: {:#?}", body);
+
+    // Verify required fields
+    assert_eq!(
+        body["slide_id"], TEST_SLIDE_ID,
+        "slide_id should match requested slide"
+    );
+    assert!(
+        body.get("format").is_some(),
+        "Response should have 'format' field"
+    );
+    assert!(
+        body.get("width").is_some(),
+        "Response should have 'width' field"
+    );
+    assert!(
+        body.get("height").is_some(),
+        "Response should have 'height' field"
+    );
+    assert!(
+        body.get("level_count").is_some(),
+        "Response should have 'level_count' field"
+    );
+    assert!(
+        body.get("levels").is_some(),
+        "Response should have 'levels' field"
+    );
+
+    // Verify dimensions are reasonable for an SVS file
+    let width = body["width"].as_u64().expect("width should be a number");
+    let height = body["height"].as_u64().expect("height should be a number");
+    println!("Slide dimensions: {}x{}", width, height);
+    assert!(width > 0, "width should be > 0");
+    assert!(height > 0, "height should be > 0");
+
+    // Verify level count
+    let level_count = body["level_count"]
+        .as_u64()
+        .expect("level_count should be a number");
+    println!("Level count: {}", level_count);
+    assert!(level_count >= 1, "Should have at least 1 pyramid level");
+
+    // Verify levels array
+    let levels = body["levels"]
+        .as_array()
+        .expect("levels should be an array");
+    assert_eq!(
+        levels.len(),
+        level_count as usize,
+        "levels array length should match level_count"
+    );
+
+    // Verify each level has required fields
+    for (i, level) in levels.iter().enumerate() {
+        assert_eq!(
+            level["level"].as_u64(),
+            Some(i as u64),
+            "Level {} should have correct index",
+            i
+        );
+        assert!(
+            level["width"].as_u64().is_some(),
+            "Level {} should have width",
+            i
+        );
+        assert!(
+            level["height"].as_u64().is_some(),
+            "Level {} should have height",
+            i
+        );
+        assert!(
+            level["tile_width"].as_u64().is_some(),
+            "Level {} should have tile_width",
+            i
+        );
+        assert!(
+            level["tile_height"].as_u64().is_some(),
+            "Level {} should have tile_height",
+            i
+        );
+        assert!(
+            level["tiles_x"].as_u64().is_some(),
+            "Level {} should have tiles_x",
+            i
+        );
+        assert!(
+            level["tiles_y"].as_u64().is_some(),
+            "Level {} should have tiles_y",
+            i
+        );
+        assert!(
+            level["downsample"].as_f64().is_some(),
+            "Level {} should have downsample",
+            i
+        );
+
+        println!(
+            "  Level {}: {}x{}, tile={}x{}, tiles={}x{}, downsample={}",
+            i,
+            level["width"],
+            level["height"],
+            level["tile_width"],
+            level["tile_height"],
+            level["tiles_x"],
+            level["tiles_y"],
+            level["downsample"]
+        );
+    }
+
+    // Verify downsample factors increase with level
+    if levels.len() > 1 {
+        let ds0 = levels[0]["downsample"].as_f64().unwrap();
+        let ds1 = levels[1]["downsample"].as_f64().unwrap();
+        assert!(
+            ds1 > ds0,
+            "Level 1 downsample ({}) should be greater than level 0 ({})",
+            ds1,
+            ds0
+        );
+    }
+
+    println!("Slide metadata test PASSED");
+}
