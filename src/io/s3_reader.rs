@@ -31,12 +31,37 @@ impl S3RangeReader {
             .send()
             .await
             .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("NotFound") || err_str.contains("NoSuchKey") {
-                    IoError::NotFound(format!("s3://{}/{}", bucket, key))
-                } else {
-                    IoError::S3(err_str)
+                // Check if this is a 404 Not Found error
+                // The HeadObjectError has an is_not_found() method that we can use
+                let is_not_found = e
+                    .as_service_error()
+                    .map(|se| se.is_not_found())
+                    .unwrap_or(false);
+
+                if is_not_found {
+                    return IoError::NotFound(format!("s3://{}/{}", bucket, key));
                 }
+
+                // Also check for 404 status code in the raw response
+                let status_is_404 = e
+                    .raw_response()
+                    .map(|r| r.status().as_u16() == 404)
+                    .unwrap_or(false);
+
+                if status_is_404 {
+                    return IoError::NotFound(format!("s3://{}/{}", bucket, key));
+                }
+
+                // Fallback: check the error string for common patterns
+                let err_str = e.to_string();
+                if err_str.contains("NotFound")
+                    || err_str.contains("NoSuchKey")
+                    || err_str.contains("404")
+                {
+                    return IoError::NotFound(format!("s3://{}/{}", bucket, key));
+                }
+
+                IoError::S3(err_str)
             })?;
 
         let size = head.content_length().unwrap_or(0) as u64;
