@@ -29,27 +29,27 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use wsi_streamer::{Config, ServeConfig, create_router, AppState, SlideRegistry, TileService};
+//! use wsi_streamer::Cli;
+//! use clap::Parser;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     // Configuration is typically loaded from CLI arguments
-//!     let config = ServeConfig {
-//!         host: "0.0.0.0".to_string(),
-//!         port: 3000,
-//!         s3_bucket: "my-slides".to_string(),
-//!         s3_prefix: None,
-//!         s3_endpoint: None,
-//!         s3_region: "us-east-1".to_string(),
-//!         auth_enabled: false,
-//!         auth_secret: None,
-//!         cache_slides: 100,
-//!         cache_tiles: "100MB".to_string(),
-//!         jpeg_quality: 80,
-//!         cors_origins: None,
-//!     };
+//!     // Parse CLI arguments (e.g., `wsi-streamer s3://my-bucket`)
+//!     let cli = Cli::parse();
 //!
-//!     // Start the server...
+//!     match cli.into_command() {
+//!         wsi_streamer::Command::Serve(config) => {
+//!             // Validate and start the server
+//!             config.validate().expect("Invalid configuration");
+//!             println!("Starting server on {}", config.bind_address());
+//!         }
+//!         wsi_streamer::Command::Sign(config) => {
+//!             // Generate signed URL
+//!         }
+//!         wsi_streamer::Command::Check(config) => {
+//!             // Validate S3 connectivity
+//!         }
+//!     }
 //! }
 //! ```
 
