@@ -1357,7 +1357,7 @@ async fn test_real_svs_all_tiles_decode_successfully() {
             (step, step)
         };
 
-        let tiles_to_test = ((tiles_x + step_x - 1) / step_x) * ((tiles_y + step_y - 1) / step_y);
+        let tiles_to_test = tiles_x.div_ceil(step_x) * tiles_y.div_ceil(step_y);
         println!(
             "Level {}: {}x{} tiles ({} total), testing {} tiles (step: {}x{})",
             level, tiles_x, tiles_y, total_level_tiles, tiles_to_test, step_x, step_y
