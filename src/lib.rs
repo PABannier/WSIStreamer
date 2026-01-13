@@ -1,7 +1,57 @@
-//! WSI Streamer - A tile server for Whole Slide Images
+//! # WSI Streamer
+//!
+//! A tile server for Whole Slide Images (WSI) stored in S3-compatible object storage.
 //!
 //! This library provides the core functionality for serving tiles from
 //! Whole Slide Images stored in cloud object storage using HTTP range requests.
+//! It streams tiles directly without downloading entire files, making it ideal
+//! for large medical imaging files (1-10GB+).
+//!
+//! ## Features
+//!
+//! - **Range-based streaming**: Fetches only the bytes needed for each tile via HTTP range requests
+//! - **Format support**: Native parsers for Aperio SVS and pyramidal TIFF formats
+//! - **Multi-level caching**: Caches slides, blocks, and encoded tiles for performance
+//! - **Built-in web viewer**: Includes OpenSeadragon-based viewer
+//! - **Authentication**: Optional HMAC-SHA256 signed URL authentication
+//!
+//! ## Architecture
+//!
+//! The library is organized into several modules:
+//!
+//! - [`io`] - I/O layer with S3 range reader and block caching
+//! - [`mod@format`] - TIFF/SVS parsers and JPEG handling
+//! - [`slide`] - Slide abstraction and registry
+//! - [`tile`] - Tile service and encoding
+//! - [`server`] - Axum-based HTTP server and routes
+//! - [`config`] - CLI and configuration types
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use wsi_streamer::{Config, ServeConfig, create_router, AppState, SlideRegistry, TileService};
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     // Configuration is typically loaded from CLI arguments
+//!     let config = ServeConfig {
+//!         host: "0.0.0.0".to_string(),
+//!         port: 3000,
+//!         s3_bucket: "my-slides".to_string(),
+//!         s3_prefix: None,
+//!         s3_endpoint: None,
+//!         s3_region: "us-east-1".to_string(),
+//!         auth_enabled: false,
+//!         auth_secret: None,
+//!         cache_slides: 100,
+//!         cache_tiles: "100MB".to_string(),
+//!         jpeg_quality: 80,
+//!         cors_origins: None,
+//!     };
+//!
+//!     // Start the server...
+//! }
+//! ```
 
 pub mod config;
 pub mod error;

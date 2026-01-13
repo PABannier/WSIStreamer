@@ -337,7 +337,7 @@ impl SignedUrlAuth {
     ///
     /// # Arguments
     ///
-    /// * `base_url` - The base URL (e.g., "https://example.com")
+    /// * `base_url` - The base URL (e.g., `https://example.com`)
     /// * `path` - The path to sign (e.g., "/tiles/slides/sample.svs/0/1/2.jpg")
     /// * `ttl` - How long the signature should be valid
     /// * `extra_params` - Additional query parameters to include

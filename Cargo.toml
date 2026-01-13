@@ -2,6 +2,24 @@
 name = "wsi-streamer"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
+authors = ["Pierre-Antoine Bannier"]
+description = "A tile server for Whole Slide Images stored in S3. Stream tiles directly from cloud storage using HTTP range requests."
+license = "MIT"
+repository = "https://github.com/PABannier/WSIStreamer"
+homepage = "https://github.com/PABannier/WSIStreamer"
+documentation = "https://docs.rs/wsi-streamer"
+readme = "README.md"
+keywords = ["wsi", "medical-imaging", "tile-server", "s3", "pathology"]
+categories = ["science", "multimedia::images", "web-programming::http-server"]
+exclude = [
+    "assets/*",
+    ".github/*",
+    ".claude/*",
+    "docker-compose.yml",
+    "Dockerfile",
+    "run_minio_integration_test.sh",
+]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
