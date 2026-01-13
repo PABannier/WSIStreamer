@@ -89,6 +89,7 @@ pub trait SlideSource: Send + Sync {
     /// # Arguments
     /// * `limit` - Maximum number of slides to return
     /// * `cursor` - Continuation token for pagination (from previous response)
+    /// * `prefix` - Optional path prefix to filter results (e.g., "folder/")
     ///
     /// # Returns
     /// A list of slide paths and optional continuation token.
@@ -96,6 +97,7 @@ pub trait SlideSource: Send + Sync {
         &self,
         _limit: u32,
         _cursor: Option<&str>,
+        _prefix: Option<&str>,
     ) -> Result<SlideListResult, IoError> {
         Ok(SlideListResult {
             slides: vec![],

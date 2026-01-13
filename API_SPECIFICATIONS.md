@@ -14,6 +14,9 @@ Complete API reference for the WSI Streamer tile server.
   - [Get Tile](#get-tile)
   - [List Slides](#list-slides)
   - [Get Slide Metadata](#get-slide-metadata)
+  - [Get DZI Descriptor](#get-dzi-descriptor)
+  - [Get Thumbnail](#get-thumbnail)
+  - [View Slide](#view-slide)
 - [Error Reference](#error-reference)
 
 ---
@@ -75,7 +78,7 @@ signature = HMAC-SHA256(secret_key, "{path}?{canonical_query}")
 http://localhost:3000
 ```
 
-Configure via `--bind` CLI argument or `WSI_BIND` environment variable.
+Configure via `--host` and `--port` CLI arguments or `WSI_HOST` and `WSI_PORT` environment variables.
 
 ---
 
@@ -292,6 +295,8 @@ Required when authentication is enabled.
 |-----------|------|----------|---------|-------------|
 | `limit` | `integer` | No | `100` | Maximum slides to return (1-1000). Values outside range are clamped. |
 | `cursor` | `string` | No | - | Continuation token from previous response for pagination. |
+| `prefix` | `string` | No | - | Filter slides by path prefix (e.g., `folder/subfolder/`). |
+| `search` | `string` | No | - | Filter slides by case-insensitive substring match on the slide name. |
 | `sig` | `string` | Conditional | - | Authentication signature (required when auth enabled). |
 | `exp` | `integer` | Conditional | - | Signature expiry timestamp (required when auth enabled). |
 
@@ -532,6 +537,176 @@ curl "http://localhost:3000/slides/sample.svs"
     }
   ]
 }
+```
+
+---
+
+### Get DZI Descriptor
+
+Retrieve a Deep Zoom Image (DZI) XML descriptor for use with OpenSeadragon and other DZI-compatible viewers.
+
+```
+GET /slides/{slide_id}/dzi
+```
+
+#### Authentication
+
+Required when authentication is enabled.
+
+#### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `slide_id` | `string` | Yes | Slide identifier. URL-encode if contains special characters. |
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sig` | `string` | Conditional | Authentication signature (required when auth enabled). |
+| `exp` | `integer` | Conditional | Signature expiry timestamp (required when auth enabled). |
+
+#### Response
+
+**Status:** `200 OK`
+
+**Content-Type:** `application/xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Image xmlns="http://schemas.microsoft.com/deepzoom/2008"
+       TileSize="256"
+       Overlap="0"
+       Format="jpg">
+  <Size Width="46920" Height="33600" />
+</Image>
+```
+
+#### Errors
+
+| HTTP Status | Error Code | Cause |
+|-------------|------------|-------|
+| 401 | `missing_signature` | Authentication enabled but `sig` missing |
+| 401 | `missing_expiry` | Authentication enabled but `exp` missing |
+| 401 | `signature_expired` | Signature has expired |
+| 401 | `invalid_signature` | Signature does not match |
+| 404 | `not_found` | Slide does not exist in storage |
+| 415 | `unsupported_format` | File is not a supported slide format |
+
+#### Example
+
+**Request:**
+```bash
+curl "http://localhost:3000/slides/sample.svs/dzi"
+```
+
+---
+
+### Get Thumbnail
+
+Retrieve a low-resolution thumbnail preview of a slide.
+
+```
+GET /slides/{slide_id}/thumbnail
+```
+
+#### Authentication
+
+Required when authentication is enabled.
+
+#### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `slide_id` | `string` | Yes | Slide identifier. URL-encode if contains special characters. |
+
+#### Query Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `max_size` | `integer` | No | `512` | Maximum width or height of the thumbnail (64-2048). |
+| `quality` | `integer` | No | `80` | JPEG quality (1-100). |
+| `sig` | `string` | Conditional | - | Authentication signature (required when auth enabled). |
+| `exp` | `integer` | Conditional | - | Signature expiry timestamp (required when auth enabled). |
+
+#### Response
+
+**Status:** `200 OK`
+
+**Content-Type:** `image/jpeg`
+
+**Body:** Binary JPEG image data.
+
+**Headers:**
+
+| Header | Example | Description |
+|--------|---------|-------------|
+| `Cache-Control` | `public, max-age=3600` | Browser caching directive |
+| `X-Tile-Cache-Hit` | `true` | Whether tile was served from server cache |
+| `X-Tile-Quality` | `80` | JPEG quality used for encoding |
+
+#### Errors
+
+| HTTP Status | Error Code | Cause |
+|-------------|------------|-------|
+| 400 | `invalid_quality` | Quality parameter is not in range 1-100 |
+| 401 | `missing_signature` | Authentication enabled but `sig` missing |
+| 401 | `missing_expiry` | Authentication enabled but `exp` missing |
+| 401 | `signature_expired` | Signature has expired |
+| 401 | `invalid_signature` | Signature does not match |
+| 404 | `not_found` | Slide does not exist in storage |
+| 415 | `unsupported_format` | File is not a supported slide format |
+
+#### Example
+
+**Request:**
+```bash
+curl "http://localhost:3000/slides/sample.svs/thumbnail?max_size=256" \
+  --output thumbnail.jpg
+```
+
+---
+
+### View Slide
+
+Get an HTML page with an embedded OpenSeadragon viewer for the slide.
+
+```
+GET /view/{slide_id}
+```
+
+#### Authentication
+
+None required. This endpoint is always public.
+
+**Note:** While the viewer page itself is public, tile requests from the viewer may require authentication if auth is enabled. In that case, you'll need to set up authentication on the client side.
+
+#### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `slide_id` | `string` | Yes | Slide identifier. URL-encode if contains special characters. |
+
+#### Response
+
+**Status:** `200 OK`
+
+**Content-Type:** `text/html`
+
+**Body:** HTML page with embedded OpenSeadragon viewer.
+
+#### Errors
+
+| HTTP Status | Error Code | Cause |
+|-------------|------------|-------|
+| 404 | `not_found` | Slide does not exist in storage |
+| 415 | `unsupported_format` | File is not a supported slide format |
+
+#### Example
+
+**Open in browser:**
+```
+http://localhost:3000/view/sample.svs
 ```
 
 ---

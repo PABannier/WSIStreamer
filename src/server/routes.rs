@@ -43,7 +43,8 @@ use tower_http::trace::TraceLayer;
 
 use super::auth::SignedUrlAuth;
 use super::handlers::{
-    health_handler, slide_metadata_handler, slides_handler, tile_handler, AppState,
+    dzi_descriptor_handler, health_handler, slide_metadata_handler, slides_handler,
+    thumbnail_handler, tile_handler, viewer_handler, AppState,
 };
 use crate::slide::SlideSource;
 use crate::tile::TileService;
@@ -200,6 +201,8 @@ where
     let slides_routes = Router::new()
         .route("/", get(slides_handler::<S>))
         .route("/{slide_id}", get(slide_metadata_handler::<S>))
+        .route("/{slide_id}/dzi", get(dzi_descriptor_handler::<S>))
+        .route("/{slide_id}/thumbnail", get(thumbnail_handler::<S>))
         .with_state(app_state.clone());
 
     // Create nested routes with auth applied AFTER nesting
@@ -212,7 +215,11 @@ where
         ));
 
     // Public routes (no auth required)
-    let public_routes = Router::new().route("/health", get(health_handler));
+    // The viewer is public because it's just HTML - tile requests are still protected
+    let public_routes = Router::new()
+        .route("/health", get(health_handler))
+        .route("/view/{slide_id}", get(viewer_handler::<S>))
+        .with_state(app_state);
 
     // Combine routes
     Router::new()
@@ -236,6 +243,9 @@ where
         )
         .route("/slides", get(slides_handler::<S>))
         .route("/slides/{slide_id}", get(slide_metadata_handler::<S>))
+        .route("/slides/{slide_id}/dzi", get(dzi_descriptor_handler::<S>))
+        .route("/slides/{slide_id}/thumbnail", get(thumbnail_handler::<S>))
+        .route("/view/{slide_id}", get(viewer_handler::<S>))
         .with_state(app_state)
         .layer(cors)
 }

@@ -167,12 +167,14 @@ impl SlideSource for MockSlideSource {
         &self,
         limit: u32,
         _cursor: Option<&str>,
+        prefix: Option<&str>,
     ) -> Result<SlideListResult, IoError> {
         // Get all slide keys that have supported extensions
         let mut slides: Vec<String> = self
             .slides
             .keys()
             .filter(|k| is_slide_file(k))
+            .filter(|k| prefix.map(|p| k.starts_with(p)).unwrap_or(true))
             .cloned()
             .collect();
 

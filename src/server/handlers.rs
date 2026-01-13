@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    http::{header, StatusCode},
-    response::{IntoResponse, Response},
+    http::{header, HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -126,6 +126,14 @@ pub struct SlidesQueryParams {
     #[serde(default)]
     pub cursor: Option<String>,
 
+    /// Filter by path prefix (e.g., "folder/subfolder/")
+    #[serde(default)]
+    pub prefix: Option<String>,
+
+    /// Search string to filter slide names (case-insensitive substring match)
+    #[serde(default)]
+    pub search: Option<String>,
+
     /// Signature for authentication (handled by auth middleware)
     #[serde(default)]
     pub sig: Option<String>,
@@ -137,6 +145,30 @@ pub struct SlidesQueryParams {
 
 fn default_limit() -> u32 {
     100
+}
+
+/// Query parameters for thumbnail requests.
+#[derive(Debug, Deserialize)]
+pub struct ThumbnailQueryParams {
+    /// Maximum width or height for the thumbnail (default: 512, max: 2048)
+    #[serde(default = "default_thumbnail_size")]
+    pub max_size: u32,
+
+    /// JPEG quality (1-100, defaults to 80)
+    #[serde(default = "default_quality")]
+    pub quality: u8,
+
+    /// Signature for authentication (handled by auth middleware)
+    #[serde(default)]
+    pub sig: Option<String>,
+
+    /// Expiry timestamp for authentication (handled by auth middleware)
+    #[serde(default)]
+    pub exp: Option<u64>,
+}
+
+fn default_thumbnail_size() -> u32 {
+    512
 }
 
 // =============================================================================
@@ -704,16 +736,28 @@ pub async fn slides_handler<S: SlideSource>(
     // Clamp limit to valid range (1-1000)
     let limit = query.limit.clamp(1, 1000);
 
-    // List slides from the source
+    // List slides from the source with optional prefix filter
     let result = state
         .tile_service
         .registry()
         .source()
-        .list_slides(limit, query.cursor.as_deref())
+        .list_slides(limit, query.cursor.as_deref(), query.prefix.as_deref())
         .await?;
 
+    // Apply search filter if provided (case-insensitive substring match)
+    let slides = if let Some(ref search) = query.search {
+        let search_lower = search.to_lowercase();
+        result
+            .slides
+            .into_iter()
+            .filter(|s| s.to_lowercase().contains(&search_lower))
+            .collect()
+    } else {
+        result.slides
+    };
+
     Ok(Json(SlidesResponse {
-        slides: result.slides,
+        slides,
         next_cursor: result.next_cursor,
     }))
 }
@@ -794,6 +838,197 @@ pub async fn slide_metadata_handler<S: SlideSource>(
         level_count,
         levels,
     }))
+}
+
+/// Handle viewer requests - serves an HTML page with OpenSeadragon viewer.
+///
+/// # Endpoint
+///
+/// `GET /view/{slide_id}`
+///
+/// # Path Parameters
+///
+/// - `slide_id`: Slide identifier (URL-encoded if contains special characters)
+///
+/// # Response
+///
+/// `200 OK` with HTML page containing an embedded OpenSeadragon viewer.
+///
+/// # Errors
+///
+/// - `404 Not Found`: Slide not found
+/// - `415 Unsupported Media Type`: Slide format not supported
+/// - `500 Internal Server Error`: Storage or processing error
+pub async fn viewer_handler<S: SlideSource>(
+    State(state): State<AppState<S>>,
+    Path(slide_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Html<String>, SlideMetadataError> {
+    // Get slide from registry to retrieve metadata
+    let slide = state.tile_service.registry().get_slide(&slide_id).await?;
+
+    // Get dimensions
+    let (width, height) = slide.dimensions().unwrap_or((0, 0));
+
+    // Build level metadata
+    let level_count = slide.level_count();
+    let levels: Vec<LevelMetadataResponse> = (0..level_count)
+        .filter_map(|level| {
+            slide.level_info(level).map(|info| LevelMetadataResponse {
+                level,
+                width: info.width,
+                height: info.height,
+                tile_width: info.tile_width,
+                tile_height: info.tile_height,
+                tiles_x: info.tiles_x,
+                tiles_y: info.tiles_y,
+                downsample: info.downsample,
+            })
+        })
+        .collect();
+
+    let metadata = SlideMetadataResponse {
+        slide_id: slide_id.clone(),
+        format: slide.format().name().to_string(),
+        width,
+        height,
+        level_count,
+        levels,
+    };
+
+    // Extract host from headers, defaulting to localhost:3000
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:3000");
+
+    // Generate the base URL from the host
+    let base_url = format!("http://{}", host);
+
+    // Generate the viewer HTML
+    // Note: auth_query is empty since the viewer page itself doesn't need auth
+    // The tile requests will need auth if enabled, but that's handled separately
+    let html = super::viewer::generate_viewer_html(&slide_id, &metadata, &base_url, "");
+
+    Ok(Html(html))
+}
+
+/// Handle DZI descriptor requests - returns XML descriptor for Deep Zoom viewers.
+///
+/// # Endpoint
+///
+/// `GET /slides/{slide_id}/dzi`
+///
+/// # Path Parameters
+///
+/// - `slide_id`: Slide identifier
+///
+/// # Response
+///
+/// `200 OK` with XML body containing DZI descriptor.
+///
+/// # Example Response
+///
+/// ```xml
+/// <?xml version="1.0" encoding="UTF-8"?>
+/// <Image xmlns="http://schemas.microsoft.com/deepzoom/2008"
+///        TileSize="256"
+///        Overlap="0"
+///        Format="jpg">
+///   <Size Width="46920" Height="33600" />
+/// </Image>
+/// ```
+///
+/// # Errors
+///
+/// - `404 Not Found`: Slide not found
+/// - `415 Unsupported Media Type`: Slide format not supported
+/// - `500 Internal Server Error`: Storage or processing error
+pub async fn dzi_descriptor_handler<S: SlideSource>(
+    State(state): State<AppState<S>>,
+    Path(slide_id): Path<String>,
+) -> Result<Response, SlideMetadataError> {
+    // Get slide from registry
+    let slide = state.tile_service.registry().get_slide(&slide_id).await?;
+
+    // Get dimensions
+    let (width, height) = slide.dimensions().unwrap_or((0, 0));
+
+    // Get tile size from level 0 (or default)
+    let tile_size = slide.tile_size(0).map(|(w, _)| w).unwrap_or(256);
+
+    // Generate DZI XML
+    let xml = super::dzi::generate_dzi_xml(width, height, tile_size);
+
+    // Build response with XML content type
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/xml")
+        .header(
+            header::CACHE_CONTROL,
+            format!("public, max-age={}", state.cache_max_age),
+        )
+        .body(axum::body::Body::from(xml))
+        .unwrap();
+
+    Ok(response)
+}
+
+/// Handle thumbnail requests - returns a low-resolution preview image.
+///
+/// # Endpoint
+///
+/// `GET /slides/{slide_id}/thumbnail`
+///
+/// # Path Parameters
+///
+/// - `slide_id`: Slide identifier (URL-encoded if contains special characters)
+///
+/// # Query Parameters
+///
+/// - `max_size`: Maximum width or height for the thumbnail (default: 512, max: 2048)
+/// - `quality`: JPEG quality 1-100 (default: 80)
+/// - `sig`: Authentication signature (for signed URLs)
+/// - `exp`: Signature expiry timestamp (for signed URLs)
+///
+/// # Response
+///
+/// `200 OK` with JPEG thumbnail image.
+///
+/// # Errors
+///
+/// - `400 Bad Request`: Invalid quality or max_size parameter
+/// - `404 Not Found`: Slide not found
+/// - `415 Unsupported Media Type`: Slide format not supported
+/// - `500 Internal Server Error`: Storage or processing error
+pub async fn thumbnail_handler<S: SlideSource>(
+    State(state): State<AppState<S>>,
+    Path(slide_id): Path<String>,
+    Query(query): Query<ThumbnailQueryParams>,
+) -> Result<Response, HandlerError> {
+    // Clamp max_size to reasonable bounds (64 to 2048)
+    let max_size = query.max_size.clamp(64, 2048);
+
+    // Generate thumbnail
+    let response = state
+        .tile_service
+        .generate_thumbnail(&slide_id, max_size, query.quality)
+        .await?;
+
+    // Build HTTP response with appropriate headers
+    let http_response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "image/jpeg")
+        .header(
+            header::CACHE_CONTROL,
+            format!("public, max-age={}", state.cache_max_age),
+        )
+        .header("X-Tile-Cache-Hit", response.cache_hit.to_string())
+        .header("X-Tile-Quality", response.quality.to_string())
+        .body(axum::body::Body::from(response.data))
+        .unwrap();
+
+    Ok(http_response)
 }
 
 // =============================================================================

@@ -16,19 +16,35 @@ Whole Slide Images are often 1-10GB+ and live in object storage. Traditional vie
 - Multi-level caching: block cache, metadata cache, and tile cache
 - Simple HTTP API for tiles and slide listing
 
-## Quick Start (Docker + MinIO)
+## Quick Start
+
+```bash
+# One-liner to start serving slides from S3
+wsi-streamer s3://my-slides-bucket
+
+# Or with explicit flags
+wsi-streamer --s3-bucket my-slides-bucket --port 8080
+
+# Health check
+curl http://localhost:3000/health
+
+# View a slide in the browser
+open http://localhost:3000/view/sample.svs
+
+# Fetch a tile
+curl -o tile.jpg http://localhost:3000/tiles/sample.svs/0/0/0.jpg
+
+# Get a thumbnail
+curl -o thumb.jpg "http://localhost:3000/slides/sample.svs/thumbnail?max_size=256"
+```
+
+### Docker + MinIO
 
 A local development stack is provided via `docker-compose.yml`.
 
 ```bash
 # Start WSI Streamer + MinIO
 docker compose up --build
-
-# Health check
-curl http://localhost:3000/health
-
-# Fetch a tile (auth disabled in compose)
-curl -o tile.jpg http://localhost:3000/tiles/slide.svs/0/0/0.jpg
 ```
 
 Upload slides with the MinIO console at `http://localhost:9001` (login: `minioadmin` / `minioadmin`) or use `mc` as shown in `docker-compose.yml`.
@@ -60,17 +76,44 @@ The release binary is located at `target/release/wsi-streamer`.
 
 ## Running the Server
 
-WSI Streamer reads configuration from CLI flags and `WSI_` environment variables.
+WSI Streamer supports three subcommands:
+
+### Serve (default)
+
+Start the tile server:
 
 ```bash
-export WSI_S3_BUCKET="my-slides"
-export WSI_S3_REGION="us-east-1"
-export WSI_AUTH_SECRET="super-secret"
+# Simplest invocation (auth disabled by default for local dev)
+wsi-streamer s3://my-slides
 
-# Optional for MinIO or other S3-compatible services
-export WSI_S3_ENDPOINT="http://localhost:9000"
+# With explicit flags
+wsi-streamer --s3-bucket my-slides --host 0.0.0.0 --port 3000
 
-wsi-streamer --host 0.0.0.0 --port 3000
+# Enable auth for production
+wsi-streamer s3://my-slides --auth-enabled --auth-secret "$SECRET"
+```
+
+### Sign
+
+Generate signed URLs for authenticated access:
+
+```bash
+# Generate a signed URL with 1-hour TTL
+wsi-streamer sign --path /tiles/sample.svs/0/0/0.jpg --secret "$SECRET"
+
+# Include quality parameter
+wsi-streamer sign --path /tiles/sample.svs/0/0/0.jpg --secret "$SECRET" --params "quality=90"
+```
+
+### Check
+
+Validate configuration and test S3 connectivity:
+
+```bash
+wsi-streamer check s3://my-slides
+
+# List available slides
+wsi-streamer check s3://my-slides --list-slides
 ```
 
 The AWS SDK default credential chain is used (env vars, shared config, IAM roles, etc.).
@@ -86,7 +129,7 @@ Common options (CLI flags mirror these env vars):
 | `WSI_S3_BUCKET` | (required) | S3 bucket containing slides |
 | `WSI_S3_ENDPOINT` | (none) | Custom endpoint for S3-compatible storage |
 | `WSI_S3_REGION` | `us-east-1` | AWS region |
-| `WSI_AUTH_ENABLED` | `true` | Enable signed URL auth |
+| `WSI_AUTH_ENABLED` | `false` | Enable signed URL auth |
 | `WSI_AUTH_SECRET` | (required if auth enabled) | HMAC secret |
 | `WSI_CACHE_SLIDES` | `100` | Max slides in registry |
 | `WSI_CACHE_BLOCKS` | `100` | Blocks cached per slide (256KB each) |
@@ -109,24 +152,47 @@ GET /tiles/{slide_id}/{level}/{x}/{y}.jpg
 - `slide_id` is the S3 object key. If the key contains `/`, URL-encode it (e.g. `slides%2Fcase-01.svs`).
 - `level` is the pyramid level (0 = highest resolution)
 - `x`, `y` are tile indices (0-based)
-- Optional query params:
-  - `quality` (1-100)
-  - `exp`, `sig` for signed URLs
-
-Example:
-
-```bash
-curl -o tile.jpg \
-  "http://localhost:3000/tiles/slides%2Fcase-01.svs/0/10/12.jpg?quality=80&exp=1735689600&sig=..."
-```
+- Optional query params: `quality` (1-100), `exp`, `sig` for signed URLs
 
 ### Slides
 
 ```
-GET /slides?limit=100&cursor=...
+GET /slides?limit=100&cursor=...&prefix=folder/&search=case
 ```
 
-Returns a JSON list of `.svs`, `.tif`, and `.tiff` objects in the bucket.
+Returns a JSON list of `.svs`, `.tif`, and `.tiff` objects in the bucket. Supports filtering by `prefix` and `search` (case-insensitive).
+
+### Slide Metadata
+
+```
+GET /slides/{slide_id}
+```
+
+Returns JSON with slide dimensions, pyramid levels, and tile information.
+
+### DZI Descriptor
+
+```
+GET /slides/{slide_id}/dzi
+```
+
+Returns a Deep Zoom Image XML descriptor for use with OpenSeadragon and other DZI-compatible viewers.
+
+### Thumbnail
+
+```
+GET /slides/{slide_id}/thumbnail?max_size=256&quality=80
+```
+
+Returns a JPEG thumbnail of the slide. `max_size` controls the maximum dimension (default: 512).
+
+### Viewer
+
+```
+GET /view/{slide_id}
+```
+
+Returns an HTML page with an embedded OpenSeadragon viewer. Open in a browser to view the slide interactively.
 
 ### Health
 

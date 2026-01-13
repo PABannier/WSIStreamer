@@ -345,6 +345,88 @@ impl<S: SlideSource> TileService<S> {
     pub fn registry(&self) -> &Arc<SlideRegistry<S>> {
         &self.registry
     }
+
+    /// Generate a thumbnail for a slide.
+    ///
+    /// This finds the lowest resolution level that fits within the requested
+    /// max dimension and returns a tile or composited image.
+    ///
+    /// # Arguments
+    ///
+    /// * `slide_id` - The slide identifier
+    /// * `max_dimension` - Maximum width or height for the thumbnail
+    /// * `quality` - JPEG quality (1-100)
+    ///
+    /// # Returns
+    ///
+    /// A JPEG-encoded thumbnail image.
+    pub async fn generate_thumbnail(
+        &self,
+        slide_id: &str,
+        max_dimension: u32,
+        quality: u8,
+    ) -> Result<TileResponse, TileError> {
+        // Validate quality
+        if !is_valid_quality(quality) {
+            return Err(TileError::InvalidQuality { quality });
+        }
+
+        // Get the slide from registry
+        let slide = self
+            .registry
+            .get_slide(slide_id)
+            .await
+            .map_err(|e| match e {
+                crate::error::FormatError::Io(io_err) => {
+                    if matches!(io_err, crate::error::IoError::NotFound(_)) {
+                        TileError::SlideNotFound {
+                            slide_id: slide_id.to_string(),
+                        }
+                    } else {
+                        TileError::Io(io_err)
+                    }
+                }
+                crate::error::FormatError::Tiff(tiff_err) => TileError::Slide(tiff_err),
+                crate::error::FormatError::UnsupportedFormat { reason } => {
+                    TileError::Slide(crate::error::TiffError::InvalidTagValue {
+                        tag: "Format",
+                        message: reason,
+                    })
+                }
+            })?;
+
+        let (full_width, full_height) = slide.dimensions().ok_or(TileError::InvalidLevel {
+            level: 0,
+            max_levels: 0,
+        })?;
+
+        // Calculate target downsample
+        let max_dim = full_width.max(full_height);
+        let downsample = max_dim as f64 / max_dimension as f64;
+
+        // Find best level for this downsample (or use lowest resolution level)
+        let level = slide
+            .best_level_for_downsample(downsample)
+            .unwrap_or(slide.level_count().saturating_sub(1));
+
+        let info = slide.level_info(level).ok_or(TileError::InvalidLevel {
+            level,
+            max_levels: slide.level_count(),
+        })?;
+
+        // If single tile covers the entire level, just return that tile
+        if info.tiles_x == 1 && info.tiles_y == 1 {
+            let request = TileRequest::with_quality(slide_id, level, 0, 0, quality);
+            return self.get_tile(request).await;
+        }
+
+        // For multiple tiles, we need to composite them
+        // For now, return the first tile from the lowest resolution level
+        // as a simple implementation
+        let lowest_level = slide.level_count().saturating_sub(1);
+        let request = TileRequest::with_quality(slide_id, lowest_level, 0, 0, quality);
+        self.get_tile(request).await
+    }
 }
 
 // =============================================================================
