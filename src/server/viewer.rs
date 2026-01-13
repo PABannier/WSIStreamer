@@ -2,6 +2,22 @@
 
 use crate::server::handlers::SlideMetadataResponse;
 
+/// Escape HTML special characters to prevent XSS attacks.
+fn html_escape(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            '"' => result.push_str("&quot;"),
+            '\'' => result.push_str("&#x27;"),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
 /// Generate an HTML page with OpenSeadragon viewer for a slide.
 ///
 /// # Arguments
@@ -32,13 +48,17 @@ pub fn generate_viewer_html(
         .map(|l| format!("{{ width: {}, height: {} }}", l.width, l.height))
         .collect();
 
+    // Escape user-controlled values to prevent XSS
+    let escaped_slide_id = html_escape(slide_id);
+    let escaped_format = html_escape(&metadata.format);
+
     format!(
         r##"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WSI Viewer - {slide_id}</title>
+    <title>WSI Viewer - {escaped_slide_id}</title>
     <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon.min.js"></script>
     <style>
         * {{
@@ -127,13 +147,13 @@ pub fn generate_viewer_html(
     </div>
 
     <div class="info-panel">
-        <h2>{slide_id}</h2>
+        <h2>{escaped_slide_id}</h2>
         <div class="meta">
             <span>{width}</span> x <span>{height}</span> px<br>
             <span>{level_count}</span> pyramid levels<br>
             Tile size: <span>{tile_size}</span> px
         </div>
-        <div class="format-badge">{format}</div>
+        <div class="format-badge">{escaped_format}</div>
     </div>
 
     <div class="controls-hint">
@@ -227,12 +247,12 @@ pub fn generate_viewer_html(
     </script>
 </body>
 </html>"##,
-        slide_id = slide_id,
+        escaped_slide_id = escaped_slide_id,
+        escaped_format = escaped_format,
         width = metadata.width,
         height = metadata.height,
         level_count = metadata.level_count,
         tile_size = tile_size,
-        format = metadata.format,
         level_dimensions = level_dimensions.join(", "),
         max_level = max_level,
         base_url = base_url,
@@ -355,5 +375,55 @@ mod tests {
         assert!(html.contains("width: 50000, height: 40000"));
         assert!(html.contains("width: 12500, height: 10000"));
         assert!(html.contains("width: 3125, height: 2500"));
+    }
+
+    #[test]
+    fn test_html_escape_basic() {
+        assert_eq!(html_escape("hello"), "hello");
+        assert_eq!(html_escape(""), "");
+        assert_eq!(html_escape("test.svs"), "test.svs");
+    }
+
+    #[test]
+    fn test_html_escape_special_chars() {
+        assert_eq!(html_escape("<script>"), "&lt;script&gt;");
+        assert_eq!(html_escape("a & b"), "a &amp; b");
+        assert_eq!(html_escape("\"quoted\""), "&quot;quoted&quot;");
+        assert_eq!(html_escape("it's"), "it&#x27;s");
+        assert_eq!(
+            html_escape("<script>alert('xss')</script>"),
+            "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"
+        );
+    }
+
+    #[test]
+    fn test_generate_viewer_html_escapes_xss_in_slide_id() {
+        let mut metadata = test_metadata();
+        metadata.slide_id = "<script>alert(1)</script>".to_string();
+
+        let html = generate_viewer_html(
+            "<script>alert(1)</script>",
+            &metadata,
+            "http://localhost:3000",
+            "",
+        );
+
+        // The literal script tag should NOT appear unescaped
+        assert!(!html.contains("<script>alert(1)</script>"));
+        // The escaped version should appear
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn test_generate_viewer_html_escapes_xss_in_format() {
+        let mut metadata = test_metadata();
+        metadata.format = "<img onerror=alert(1)>".to_string();
+
+        let html = generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "");
+
+        // The literal img tag should NOT appear unescaped
+        assert!(!html.contains("<img onerror=alert(1)>"));
+        // The escaped version should appear in the format badge
+        assert!(html.contains("&lt;img onerror=alert(1)&gt;"));
     }
 }

@@ -679,17 +679,31 @@ mod tests {
 
         let correct_sig = auth.sign_with_expiry(path, expiry);
 
+        // Helper to flip a hex character to a definitely different one
+        fn flip_hex_char(c: char) -> char {
+            match c {
+                '0'..='8' => ((c as u8) + 1) as char,
+                '9' => '0',
+                'a'..='e' => ((c as u8) + 1) as char,
+                'f' => 'a',
+                _ => '0',
+            }
+        }
+
         // Create signatures with differences at different positions
         let mut wrong_first = correct_sig.clone();
-        wrong_first.replace_range(0..1, "0");
+        let first_char = correct_sig.chars().next().unwrap();
+        wrong_first.replace_range(0..1, &flip_hex_char(first_char).to_string());
 
         let mut wrong_middle = correct_sig.clone();
         let mid = correct_sig.len() / 2;
-        wrong_middle.replace_range(mid..mid + 1, "0");
+        let mid_char = correct_sig.chars().nth(mid).unwrap();
+        wrong_middle.replace_range(mid..mid + 1, &flip_hex_char(mid_char).to_string());
 
         let mut wrong_last = correct_sig.clone();
         let last = correct_sig.len() - 1;
-        wrong_last.replace_range(last..last + 1, "0");
+        let last_char = correct_sig.chars().nth(last).unwrap();
+        wrong_last.replace_range(last..last + 1, &flip_hex_char(last_char).to_string());
 
         // All should fail (we can't easily test timing, but we verify correctness)
         assert!(auth.verify(path, &wrong_first, expiry, &[]).is_err());

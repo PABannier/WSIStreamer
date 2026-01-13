@@ -459,8 +459,7 @@ fn parse_s3_uri(uri: &str) -> Result<String, String> {
     // Handle both s3:// prefix and plain bucket names
     let uri = uri.trim();
 
-    if uri.starts_with("s3://") {
-        let path = &uri[5..];
+    if let Some(path) = uri.strip_prefix("s3://") {
         let bucket = path.split('/').next().unwrap_or("");
         if bucket.is_empty() {
             return Err(format!(

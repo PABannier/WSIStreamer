@@ -68,8 +68,8 @@ pub fn dzi_level_dimensions(
     }
 
     let scale = 1u32 << (max_dzi_level - dzi_level);
-    let level_width = (width + scale - 1) / scale;
-    let level_height = (height + scale - 1) / scale;
+    let level_width = width.div_ceil(scale);
+    let level_height = height.div_ceil(scale);
 
     (level_width.max(1), level_height.max(1))
 }
@@ -142,8 +142,8 @@ pub fn parse_dzi_tile_coords(filename: &str) -> Option<(u32, u32)> {
 
 /// Calculate tile count at a DZI level.
 pub fn dzi_tile_count(level_width: u32, level_height: u32, tile_size: u32) -> (u32, u32) {
-    let tiles_x = (level_width + tile_size - 1) / tile_size;
-    let tiles_y = (level_height + tile_size - 1) / tile_size;
+    let tiles_x = level_width.div_ceil(tile_size);
+    let tiles_y = level_height.div_ceil(tile_size);
     (tiles_x.max(1), tiles_y.max(1))
 }
 
