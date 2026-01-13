@@ -1,100 +1,95 @@
 # WSI Streamer
 
-[![CI](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)
+[![CI](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml)
+[![crates.io](https://img.shields.io/crates/v/wsi-streamer.svg)](https://crates.io/crates/wsi-streamer)
+[![docs.rs](https://img.shields.io/docsrs/wsi-streamer)](https://docs.rs/wsi-streamer)
 
-A tile server for Whole Slide Images stored in S3. One command to start serving tiles from your slides.
+A modern, cloud-native tile server for Whole Slide Images. One command to start serving tiles directly from S3.
 
 ![WSI Streamer Banner](./assets/banner.png)
 
-## Quick Start
-
 ```bash
-# Start serving slides from S3
 wsi-streamer s3://my-slides-bucket
-
-# View a slide in your browser
-open http://localhost:3000/view/sample.svs
 ```
 
-That's it. No configuration files, no local storage, no complex setup.
+That's it. No configuration files, no local storage, no complex setup. Open `http://localhost:3000/view/sample.svs` in your browser to view a slide.
 
 ## Why WSI Streamer?
 
-Whole Slide Images are often 1-10GB+ and live in object storage. Traditional viewers expect a local filesystem and force full downloads before a single tile can be served. WSI Streamer is built for cloud-native storage: it understands the slide formats, pulls only the bytes it needs via HTTP range requests, and returns JPEG tiles immediately.
+Whole Slide Images are large (1-10GB+) and typically live in object storage. Traditional viewers require downloading entire files before serving a single tile. WSI Streamer takes a different approach: it understands slide formats natively, fetches only the bytes needed via HTTP range requests, and returns JPEG tiles immediately.
 
-**Key features:**
-- Streams tiles directly from S3 using range requests (no local files)
-- Built-in web viewer with OpenSeadragon
-- Native Rust parsers for SVS and pyramidal TIFF
-- Optional signed URL authentication with HMAC-SHA256
-- Multi-level caching: slides, blocks, and tiles
+- **Range-based streaming** — fetches only the bytes needed for each tile, no local files
+- **Built-in viewer** — OpenSeadragon-based web viewer with pan, zoom, and dark theme
+- **Native format support** — Rust parsers for Aperio SVS and pyramidal TIFF
+- **Production-ready** — HMAC-SHA256 signed URL authentication
+- **Multi-level caching** — slides, blocks, and encoded tiles
 
 ## Installation
 
-```bash
-# Install with Cargo
-cargo install --path .
+Install from [crates.io](https://crates.io/crates/wsi-streamer):
 
-# Or build from source
+```bash
+cargo install wsi-streamer
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/PABannier/WSIStreamer.git
+cd WSIStreamer
 cargo build --release
+```
+
+Or run with Docker:
+
+```bash
+docker compose up --build
 ```
 
 ## Usage
 
-### Basic Usage
+### Basic
 
 ```bash
-# Serve slides from an S3 bucket
+# Serve slides from S3
 wsi-streamer s3://my-slides
 
 # Custom port
 wsi-streamer s3://my-slides --port 8080
 
-# With MinIO or other S3-compatible storage
+# S3-compatible storage (MinIO, etc.)
 wsi-streamer s3://slides --s3-endpoint http://localhost:9000
 ```
 
-### View Slides
-
-Open slides directly in your browser:
-
-```
-http://localhost:3000/view/sample.svs
-http://localhost:3000/view/folder%2Fsubfolder%2Fslide.svs
-```
-
-The built-in viewer provides pan, zoom, and navigation with a dark theme optimized for slide viewing.
-
-### API Access
+### API
 
 ```bash
-# List available slides
+# List slides
 curl http://localhost:3000/slides
 
 # Get slide metadata
 curl http://localhost:3000/slides/sample.svs
 
 # Fetch a tile (level 0, position 0,0)
-curl -o tile.jpg http://localhost:3000/tiles/sample.svs/0/0/0.jpg
+curl http://localhost:3000/tiles/sample.svs/0/0/0.jpg -o tile.jpg
 
-# Get a thumbnail
-curl -o thumb.jpg "http://localhost:3000/slides/sample.svs/thumbnail?max_size=256"
+# Get thumbnail
+curl "http://localhost:3000/slides/sample.svs/thumbnail?max_size=256" -o thumb.jpg
 ```
 
-### Production with Authentication
+### Authentication
 
 ```bash
 # Enable HMAC-SHA256 authentication
 wsi-streamer s3://my-slides --auth-enabled --auth-secret "$SECRET"
 
-# Generate signed URLs with the CLI
-wsi-streamer sign --path /tiles/slide.svs/0/0/0.jpg --secret "$SECRET" \
-  --base-url http://localhost:3000
+# Generate signed URLs
+wsi-streamer sign --path /tiles/slide.svs/0/0/0.jpg --secret "$SECRET" --base-url http://localhost:3000
 ```
 
-When auth is enabled, the web viewer automatically handles authentication - no additional setup required.
+The web viewer handles authentication automatically when enabled.
 
-### Validate Configuration
+### Validation
 
 ```bash
 # Check S3 connectivity
@@ -107,18 +102,6 @@ wsi-streamer check s3://my-slides --list-slides
 wsi-streamer check s3://my-slides --test-slide sample.svs
 ```
 
-## Commands
-
-WSI Streamer provides three commands:
-
-| Command | Description |
-|---------|-------------|
-| `serve` (default) | Start the tile server |
-| `sign` | Generate signed URLs for authenticated access |
-| `check` | Validate configuration and test S3 connectivity |
-
-Run `wsi-streamer --help` for all options.
-
 ## Configuration
 
 All options can be set via CLI flags or environment variables:
@@ -127,39 +110,31 @@ All options can be set via CLI flags or environment variables:
 |--------|---------|---------|-------------|
 | `--host` | `WSI_HOST` | `0.0.0.0` | Bind address |
 | `--port` | `WSI_PORT` | `3000` | HTTP port |
-| `--s3-bucket` | `WSI_S3_BUCKET` | - | S3 bucket name |
-| `--s3-endpoint` | `WSI_S3_ENDPOINT` | - | Custom S3 endpoint |
+| `--s3-bucket` | `WSI_S3_BUCKET` | — | S3 bucket name |
+| `--s3-endpoint` | `WSI_S3_ENDPOINT` | — | Custom S3 endpoint |
 | `--s3-region` | `WSI_S3_REGION` | `us-east-1` | AWS region |
 | `--auth-enabled` | `WSI_AUTH_ENABLED` | `false` | Enable authentication |
-| `--auth-secret` | `WSI_AUTH_SECRET` | - | HMAC secret key |
+| `--auth-secret` | `WSI_AUTH_SECRET` | — | HMAC secret key |
 | `--cache-slides` | `WSI_CACHE_SLIDES` | `100` | Max slides in cache |
 | `--cache-tiles` | `WSI_CACHE_TILES` | `100MB` | Tile cache size |
-| `--jpeg-quality` | `WSI_JPEG_QUALITY` | `80` | Default JPEG quality |
+| `--jpeg-quality` | `WSI_JPEG_QUALITY` | `80` | JPEG quality (1-100) |
 | `--cors-origins` | `WSI_CORS_ORIGINS` | any | Allowed CORS origins |
 
-## API Endpoints
+Run `wsi-streamer --help` for full details.
+
+## API Reference
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check |
-| `GET /view/{slide_id}` | Web viewer for a slide |
-| `GET /tiles/{slide_id}/{level}/{x}/{y}.jpg` | Fetch a tile |
-| `GET /slides` | List available slides |
-| `GET /slides/{slide_id}` | Get slide metadata |
-| `GET /slides/{slide_id}/thumbnail` | Get slide thumbnail |
-| `GET /slides/{slide_id}/dzi` | Get DZI descriptor |
+| `GET /view/{slide_id}` | Web viewer |
+| `GET /tiles/{slide_id}/{level}/{x}/{y}.jpg` | Fetch tile |
+| `GET /slides` | List slides |
+| `GET /slides/{slide_id}` | Slide metadata |
+| `GET /slides/{slide_id}/thumbnail` | Thumbnail |
+| `GET /slides/{slide_id}/dzi` | DZI descriptor |
 
 See [API_SPECIFICATIONS.md](./API_SPECIFICATIONS.md) for complete documentation.
-
-## Docker
-
-```bash
-# Start with Docker Compose (includes MinIO)
-docker compose up --build
-
-# Access MinIO console at http://localhost:9001
-# Login: minioadmin / minioadmin
-```
 
 ## Supported Formats
 
@@ -168,7 +143,7 @@ docker compose up --build
 | Aperio SVS | `.svs` | JPEG, JPEG 2000 |
 | Pyramidal TIFF | `.tif`, `.tiff` | JPEG, JPEG 2000 |
 
-Files must be tiled (not stripped) and pyramidal. Unsupported files return `415 Unsupported Media Type`.
+Files must be tiled (not stripped) and pyramidal.
 
 ## Architecture
 
@@ -229,4 +204,4 @@ MIT. See [LICENSE](./LICENSE).
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+Issues and pull requests welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
