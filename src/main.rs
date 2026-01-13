@@ -118,7 +118,12 @@ async fn run_serve(config: ServeConfig) -> ExitCode {
     info!("  Try these endpoints:");
     info!("    curl http://{}/health", addr);
     info!("    curl http://{}/slides", addr);
+    info!("");
+    info!("  View slides in your browser:");
+    info!("    open http://{}/view/<slide_id>", addr);
     if !config.auth_enabled {
+        info!("");
+        info!("  Fetch a tile directly:");
         info!("    curl http://{}/tiles/<slide_id>/0/0/0.jpg", addr);
     }
     info!("────────────────────────────────────────────────────────────────");

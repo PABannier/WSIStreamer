@@ -139,9 +139,38 @@ pub fn generate_viewer_html(
             color: rgba(255, 255, 255, 0.5);
             font-size: 14px;
         }}
+        .error-banner {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(220, 38, 38, 0.95);
+            color: white;
+            padding: 12px 20px;
+            font-size: 14px;
+            z-index: 1000;
+            display: none;
+            backdrop-filter: blur(10px);
+        }}
+        .error-banner.visible {{
+            display: block;
+        }}
+        .error-banner strong {{
+            font-weight: 600;
+        }}
+        .error-banner .error-details {{
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 4px;
+        }}
     </style>
 </head>
 <body>
+    <div id="error-banner" class="error-banner">
+        <strong>Failed to load tiles</strong>
+        <div class="error-details" id="error-details"></div>
+    </div>
+
     <div id="viewer">
         <div class="loading">Loading slide...</div>
     </div>
@@ -228,10 +257,52 @@ pub fn generate_viewer_html(
             crossOriginPolicy: "Anonymous"
         }});
 
+        // Track errors
+        let errorCount = 0;
+        let firstErrorShown = false;
+
         // Remove loading message when first tile loads
         viewer.addHandler('tile-loaded', function() {{
             const loading = document.querySelector('.loading');
             if (loading) loading.remove();
+        }});
+
+        // Handle tile load errors
+        viewer.addHandler('tile-load-failed', function(event) {{
+            errorCount++;
+
+            // Show error banner on first failure
+            if (!firstErrorShown) {{
+                firstErrorShown = true;
+                const banner = document.getElementById('error-banner');
+                const details = document.getElementById('error-details');
+
+                // Try to determine the error type
+                let errorMessage = 'Unable to load slide tiles. ';
+                if (event.message) {{
+                    if (event.message.includes('401')) {{
+                        errorMessage += 'Authentication failed - the viewer token may have expired. Try refreshing the page.';
+                    }} else if (event.message.includes('404')) {{
+                        errorMessage += 'Tile not found - the slide may have been moved or deleted.';
+                    }} else if (event.message.includes('415')) {{
+                        errorMessage += 'Unsupported slide format.';
+                    }} else {{
+                        errorMessage += event.message;
+                    }}
+                }} else {{
+                    errorMessage += 'Check your network connection and try refreshing the page.';
+                }}
+
+                details.textContent = errorMessage;
+                banner.classList.add('visible');
+
+                // Also update loading message
+                const loading = document.querySelector('.loading');
+                if (loading) {{
+                    loading.textContent = 'Error loading slide';
+                    loading.style.color = 'rgba(220, 38, 38, 0.8)';
+                }}
+            }}
         }});
 
         // Keyboard shortcuts

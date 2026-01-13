@@ -161,8 +161,13 @@ pub fn create_router<S>(tile_service: TileService<S>, config: RouterConfig) -> R
 where
     S: SlideSource + 'static,
 {
-    // Create application state
-    let app_state = AppState::with_cache_max_age(tile_service, config.cache_max_age);
+    // Create application state with auth info for viewer token generation
+    let app_state = if config.auth_enabled {
+        let auth = SignedUrlAuth::new(&config.auth_secret);
+        AppState::with_cache_max_age(tile_service, config.cache_max_age).with_auth(auth.clone())
+    } else {
+        AppState::with_cache_max_age(tile_service, config.cache_max_age)
+    };
 
     // Create the auth layer if enabled
     let auth = SignedUrlAuth::new(&config.auth_secret);

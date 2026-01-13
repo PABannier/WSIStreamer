@@ -84,6 +84,26 @@ pub const DEFAULT_SIGN_TTL: u64 = 3600;
 #[command(name = "wsi-streamer")]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
+#[command(after_help = "\
+EXAMPLES:
+    # Start serving slides from an S3 bucket
+    wsi-streamer s3://my-slides-bucket
+
+    # Use a custom port
+    wsi-streamer s3://my-slides --port 8080
+
+    # With MinIO (local S3-compatible storage)
+    wsi-streamer s3://slides --s3-endpoint http://localhost:9000
+
+    # Enable authentication for production
+    wsi-streamer s3://my-slides --auth-enabled --auth-secret $SECRET
+
+    # Check S3 connectivity and list slides
+    wsi-streamer check s3://my-slides --list-slides
+
+    # Generate a signed URL for a tile
+    wsi-streamer sign --path /tiles/slide.svs/0/0/0.jpg --secret $SECRET
+")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,

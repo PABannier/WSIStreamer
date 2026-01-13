@@ -8,6 +8,7 @@
 //! - `GET /health` - Health check endpoint
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     extract::{Path, Query, State},
@@ -22,6 +23,8 @@ use crate::error::{FormatError, IoError, TiffError, TileError};
 use crate::slide::SlideSource;
 use crate::tile::{TileRequest, TileService, DEFAULT_JPEG_QUALITY};
 
+use super::auth::SignedUrlAuth;
+
 // =============================================================================
 // Application State
 // =============================================================================
@@ -35,6 +38,9 @@ pub struct AppState<S: SlideSource> {
 
     /// Default cache control max-age in seconds (defaults to 1 hour)
     pub cache_max_age: u32,
+
+    /// Authentication configuration for generating signed URLs in the viewer
+    pub auth: Option<SignedUrlAuth>,
 }
 
 impl<S: SlideSource> AppState<S> {
@@ -43,6 +49,7 @@ impl<S: SlideSource> AppState<S> {
         Self {
             tile_service: Arc::new(tile_service),
             cache_max_age: 3600, // 1 hour default
+            auth: None,
         }
     }
 
@@ -51,7 +58,14 @@ impl<S: SlideSource> AppState<S> {
         Self {
             tile_service: Arc::new(tile_service),
             cache_max_age,
+            auth: None,
         }
+    }
+
+    /// Set authentication for the viewer to generate signed tile URLs.
+    pub fn with_auth(mut self, auth: SignedUrlAuth) -> Self {
+        self.auth = Some(auth);
+        self
     }
 }
 
@@ -60,6 +74,7 @@ impl<S: SlideSource> Clone for AppState<S> {
         Self {
             tile_service: Arc::clone(&self.tile_service),
             cache_max_age: self.cache_max_age,
+            auth: self.auth.clone(),
         }
     }
 }
@@ -902,13 +917,31 @@ pub async fn viewer_handler<S: SlideSource>(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("localhost:3000");
 
-    // Generate the base URL from the host
-    let base_url = format!("http://{}", host);
+    // Detect protocol from X-Forwarded-Proto header (for reverse proxy support)
+    // or default to http for local development
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("http");
 
-    // Generate the viewer HTML
-    // Note: auth_query is empty since the viewer page itself doesn't need auth
-    // The tile requests will need auth if enabled, but that's handled separately
-    let html = super::viewer::generate_viewer_html(&slide_id, &metadata, &base_url, "");
+    // Generate the base URL from the host and protocol
+    let base_url = format!("{}://{}", proto, host);
+
+    // Generate viewer token if auth is enabled
+    // This token authorizes access to all tiles for this specific slide
+    let auth_query = state
+        .auth
+        .as_ref()
+        .map(|auth| {
+            // Generate viewer token valid for 1 hour
+            let ttl = Duration::from_secs(3600);
+            let (token, expiry) = auth.generate_viewer_token(&slide_id, ttl);
+            format!("?vt={}&exp={}", token, expiry)
+        })
+        .unwrap_or_default();
+
+    // Generate the viewer HTML with auth info
+    let html = super::viewer::generate_viewer_html(&slide_id, &metadata, &base_url, &auth_query);
 
     Ok(Html(html))
 }
@@ -1007,7 +1040,9 @@ pub async fn thumbnail_handler<S: SlideSource>(
     Query(query): Query<ThumbnailQueryParams>,
 ) -> Result<Response, HandlerError> {
     // Clamp max_size to reasonable bounds (64 to 2048)
-    let max_size = query.max_size.clamp(64, 2048);
+    let requested_size = query.max_size;
+    let max_size = requested_size.clamp(64, 2048);
+    let was_clamped = max_size != requested_size;
 
     // Generate thumbnail
     let response = state
@@ -1016,7 +1051,7 @@ pub async fn thumbnail_handler<S: SlideSource>(
         .await?;
 
     // Build HTTP response with appropriate headers
-    let http_response = Response::builder()
+    let mut builder = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "image/jpeg")
         .header(
@@ -1024,9 +1059,17 @@ pub async fn thumbnail_handler<S: SlideSource>(
             format!("public, max-age={}", state.cache_max_age),
         )
         .header("X-Tile-Cache-Hit", response.cache_hit.to_string())
-        .header("X-Tile-Quality", response.quality.to_string())
-        .body(axum::body::Body::from(response.data))
-        .unwrap();
+        .header("X-Tile-Quality", response.quality.to_string());
+
+    // Add header indicating if max_size was clamped
+    if was_clamped {
+        builder = builder
+            .header("X-Thumbnail-Size-Clamped", "true")
+            .header("X-Thumbnail-Requested-Size", requested_size.to_string())
+            .header("X-Thumbnail-Actual-Size", max_size.to_string());
+    }
+
+    let http_response = builder.body(axum::body::Body::from(response.data)).unwrap();
 
     Ok(http_response)
 }
