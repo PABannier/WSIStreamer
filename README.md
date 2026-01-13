@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml)
 [![crates.io](https://img.shields.io/crates/v/wsi-streamer.svg)](https://crates.io/crates/wsi-streamer)
-[![docs.rs](https://img.shields.io/docsrs/wsi-streamer)](https://docs.rs/wsi-streamer)
+[![Docker](https://ghcr-badge.egpl.dev/pabannier/wsistreamer/size?color=%2344cc11&tag=latest&label=image+size&trim=)](https://github.com/PABannier/WSIStreamer/pkgs/container/wsistreamer)
 
 A modern, cloud-native tile server for Whole Slide Images. One command to start serving tiles directly from S3.
 
