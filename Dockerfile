@@ -34,6 +34,11 @@ RUN cargo build --release
 # ------------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
+# OCI labels for GitHub Container Registry
+LABEL org.opencontainers.image.source="https://github.com/PABannier/WSIStreamer"
+LABEL org.opencontainers.image.description="A tile server for Whole Slide Images stored in S3"
+LABEL org.opencontainers.image.licenses="MIT"
+
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \

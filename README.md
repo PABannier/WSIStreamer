@@ -43,6 +43,10 @@ cargo build --release
 Or run with Docker:
 
 ```bash
+# Pull from GitHub Container Registry
+docker run -p 3000:3000 -e WSI_S3_BUCKET=my-bucket ghcr.io/pabannier/wsistreamer:latest
+
+# Or use Docker Compose for local development with MinIO
 docker compose up --build
 ```
 
