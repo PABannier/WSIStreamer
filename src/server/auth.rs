@@ -368,6 +368,85 @@ impl SignedUrlAuth {
 
         url
     }
+
+    /// Generate a viewer token for accessing all tiles of a specific slide.
+    ///
+    /// Viewer tokens are special tokens that authorize access to all tiles
+    /// for a given slide, rather than signing individual tile paths. This is
+    /// used by the built-in viewer to access tiles when auth is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `slide_id` - The slide identifier
+    /// * `ttl` - How long the token should be valid
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (token, expiry_timestamp)
+    pub fn generate_viewer_token(&self, slide_id: &str, ttl: Duration) -> (String, u64) {
+        let expiry = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + ttl.as_secs();
+
+        let message = format!("viewer:{}:{}", slide_id, expiry);
+
+        let mut mac =
+            HmacSha256::new_from_slice(&self.secret_key).expect("HMAC can take key of any size");
+        mac.update(message.as_bytes());
+        let result = mac.finalize();
+
+        (hex::encode(result.into_bytes()), expiry)
+    }
+
+    /// Verify a viewer token for a specific slide.
+    ///
+    /// # Arguments
+    ///
+    /// * `slide_id` - The slide identifier the token should authorize
+    /// * `token` - The hex-encoded viewer token
+    /// * `expiry` - The expiry timestamp
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the token is valid and not expired, `Err(AuthError)` otherwise.
+    pub fn verify_viewer_token(
+        &self,
+        slide_id: &str,
+        token: &str,
+        expiry: u64,
+    ) -> Result<(), AuthError> {
+        // Check expiry first
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if current_time > expiry {
+            return Err(AuthError::Expired {
+                expired_at: expiry,
+                current_time,
+            });
+        }
+
+        // Decode the provided token
+        let provided_token = hex::decode(token).map_err(|_| AuthError::InvalidSignatureFormat)?;
+
+        // Compute expected token
+        let message = format!("viewer:{}:{}", slide_id, expiry);
+        let mut mac =
+            HmacSha256::new_from_slice(&self.secret_key).expect("HMAC can take key of any size");
+        mac.update(message.as_bytes());
+        let expected_token = mac.finalize().into_bytes();
+
+        // Constant-time comparison
+        if provided_token.ct_eq(&expected_token).into() {
+            Ok(())
+        } else {
+            Err(AuthError::InvalidSignature)
+        }
+    }
 }
 
 fn signature_base(path: &str, expiry: u64, params: &[(&str, &str)]) -> String {
@@ -419,6 +498,12 @@ pub struct AuthQueryParams {
 /// verifies them against the request path, and rejects unauthorized requests
 /// with a 401 status code.
 ///
+/// The middleware supports two authentication modes:
+/// 1. **Path-specific signatures**: Uses `sig` and `exp` query params to verify
+///    a signature for the exact request path.
+/// 2. **Viewer tokens**: Uses `vt` and `exp` query params to verify a token
+///    that authorizes access to all tiles for a specific slide.
+///
 /// # Example
 ///
 /// ```ignore
@@ -438,6 +523,7 @@ pub async fn auth_middleware(
 ) -> Result<Response, AuthError> {
     let query = original_uri.query().unwrap_or("");
     let mut signature: Option<String> = None;
+    let mut viewer_token: Option<String> = None;
     let mut expiry: Option<u64> = None;
     let mut extra_params: Vec<(String, String)> = Vec::new();
 
@@ -447,6 +533,13 @@ pub async fn auth_middleware(
                 return Err(AuthError::InvalidSignatureFormat);
             }
             signature = Some(value.into_owned());
+            continue;
+        }
+        if key == "vt" {
+            if viewer_token.is_some() {
+                return Err(AuthError::InvalidSignatureFormat);
+            }
+            viewer_token = Some(value.into_owned());
             continue;
         }
         if key == "exp" {
@@ -463,11 +556,23 @@ pub async fn auth_middleware(
         extra_params.push((key.into_owned(), value.into_owned()));
     }
 
-    let signature = signature.ok_or(AuthError::MissingSignature)?;
     let expiry = expiry.ok_or(AuthError::MissingExpiry)?;
-
-    // Get the path from the request
     let path = original_uri.path();
+
+    // Check for viewer token first (used by built-in viewer)
+    if let Some(token) = viewer_token {
+        // Extract slide_id from the path
+        // Expected formats: /tiles/{slide_id}/... or /slides/{slide_id}/...
+        let slide_id = extract_slide_id_from_path(path);
+        if let Some(slide_id) = slide_id {
+            auth.verify_viewer_token(&slide_id, &token, expiry)?;
+            return Ok(next.run(request).await);
+        }
+        // If we can't extract slide_id, fall through to require regular signature
+    }
+
+    // Fall back to regular signature verification
+    let signature = signature.ok_or(AuthError::MissingSignature)?;
 
     // Verify signature
     let extra_params_ref: Vec<(&str, &str)> = extra_params
@@ -478,6 +583,30 @@ pub async fn auth_middleware(
 
     // Continue to the handler
     Ok(next.run(request).await)
+}
+
+/// Extract the slide_id from a tile or slides path.
+///
+/// Handles paths like:
+/// - `/tiles/{slide_id}/{level}/{x}/{y}.jpg`
+/// - `/slides/{slide_id}`
+/// - `/slides/{slide_id}/dzi`
+/// - `/slides/{slide_id}/thumbnail`
+fn extract_slide_id_from_path(path: &str) -> Option<String> {
+    let parts: Vec<&str> = path.split('/').collect();
+
+    // Expected: ["", "tiles" or "slides", slide_id, ...]
+    if parts.len() < 3 {
+        return None;
+    }
+
+    match parts[1] {
+        "tiles" | "slides" => {
+            // URL-decode the slide_id
+            urlencoding::decode(parts[2]).ok().map(|s| s.into_owned())
+        }
+        _ => None,
+    }
 }
 
 /// Axum extractor for optional authentication.
@@ -679,21 +808,132 @@ mod tests {
 
         let correct_sig = auth.sign_with_expiry(path, expiry);
 
+        // Helper to flip a hex character to a definitely different one
+        fn flip_hex_char(c: char) -> char {
+            match c {
+                '0'..='8' => ((c as u8) + 1) as char,
+                '9' => '0',
+                'a'..='e' => ((c as u8) + 1) as char,
+                'f' => 'a',
+                _ => '0',
+            }
+        }
+
         // Create signatures with differences at different positions
         let mut wrong_first = correct_sig.clone();
-        wrong_first.replace_range(0..1, "0");
+        let first_char = correct_sig.chars().next().unwrap();
+        wrong_first.replace_range(0..1, &flip_hex_char(first_char).to_string());
 
         let mut wrong_middle = correct_sig.clone();
         let mid = correct_sig.len() / 2;
-        wrong_middle.replace_range(mid..mid + 1, "0");
+        let mid_char = correct_sig.chars().nth(mid).unwrap();
+        wrong_middle.replace_range(mid..mid + 1, &flip_hex_char(mid_char).to_string());
 
         let mut wrong_last = correct_sig.clone();
         let last = correct_sig.len() - 1;
-        wrong_last.replace_range(last..last + 1, "0");
+        let last_char = correct_sig.chars().nth(last).unwrap();
+        wrong_last.replace_range(last..last + 1, &flip_hex_char(last_char).to_string());
 
         // All should fail (we can't easily test timing, but we verify correctness)
         assert!(auth.verify(path, &wrong_first, expiry, &[]).is_err());
         assert!(auth.verify(path, &wrong_middle, expiry, &[]).is_err());
         assert!(auth.verify(path, &wrong_last, expiry, &[]).is_err());
+    }
+
+    #[test]
+    fn test_viewer_token_generate_and_verify() {
+        let auth = SignedUrlAuth::new("test-secret-key");
+        let slide_id = "slides/sample.svs";
+        let ttl = Duration::from_secs(3600);
+
+        let (token, expiry) = auth.generate_viewer_token(slide_id, ttl);
+
+        // Token should verify for the same slide
+        assert!(auth.verify_viewer_token(slide_id, &token, expiry).is_ok());
+    }
+
+    #[test]
+    fn test_viewer_token_wrong_slide() {
+        let auth = SignedUrlAuth::new("test-secret-key");
+        let slide_id = "slides/sample.svs";
+        let wrong_slide = "slides/other.svs";
+        let ttl = Duration::from_secs(3600);
+
+        let (token, expiry) = auth.generate_viewer_token(slide_id, ttl);
+
+        // Token should NOT verify for a different slide
+        assert!(auth
+            .verify_viewer_token(wrong_slide, &token, expiry)
+            .is_err());
+    }
+
+    #[test]
+    fn test_viewer_token_expired() {
+        let auth = SignedUrlAuth::new("test-secret-key");
+        let slide_id = "slides/sample.svs";
+
+        // Generate token that's already expired
+        let expired_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 100; // 100 seconds in the past
+
+        let message = format!("viewer:{}:{}", slide_id, expired_time);
+        let mut mac = HmacSha256::new_from_slice(b"test-secret-key").unwrap();
+        mac.update(message.as_bytes());
+        let token = hex::encode(mac.finalize().into_bytes());
+
+        let result = auth.verify_viewer_token(slide_id, &token, expired_time);
+        assert!(matches!(result, Err(AuthError::Expired { .. })));
+    }
+
+    #[test]
+    fn test_viewer_token_different_keys() {
+        let auth1 = SignedUrlAuth::new("key1");
+        let auth2 = SignedUrlAuth::new("key2");
+        let slide_id = "slides/sample.svs";
+        let ttl = Duration::from_secs(3600);
+
+        let (token, expiry) = auth1.generate_viewer_token(slide_id, ttl);
+
+        // Token from auth1 should not verify with auth2
+        assert!(auth2.verify_viewer_token(slide_id, &token, expiry).is_err());
+    }
+
+    #[test]
+    fn test_extract_slide_id_from_path_tiles() {
+        assert_eq!(
+            extract_slide_id_from_path("/tiles/sample.svs/0/1/2.jpg"),
+            Some("sample.svs".to_string())
+        );
+        assert_eq!(
+            extract_slide_id_from_path("/tiles/folder%2Fsample.svs/0/1/2.jpg"),
+            Some("folder/sample.svs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_slide_id_from_path_slides() {
+        assert_eq!(
+            extract_slide_id_from_path("/slides/sample.svs"),
+            Some("sample.svs".to_string())
+        );
+        assert_eq!(
+            extract_slide_id_from_path("/slides/sample.svs/dzi"),
+            Some("sample.svs".to_string())
+        );
+        assert_eq!(
+            extract_slide_id_from_path("/slides/sample.svs/thumbnail"),
+            Some("sample.svs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_slide_id_from_path_invalid() {
+        assert_eq!(extract_slide_id_from_path("/health"), None);
+        assert_eq!(extract_slide_id_from_path("/view/sample.svs"), None);
+        assert_eq!(extract_slide_id_from_path("/"), None);
+        assert_eq!(extract_slide_id_from_path(""), None);
     }
 }

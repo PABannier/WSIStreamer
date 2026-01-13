@@ -80,6 +80,7 @@ impl SlideSource for S3SlideSource {
         &self,
         limit: u32,
         cursor: Option<&str>,
+        prefix: Option<&str>,
     ) -> Result<SlideListResult, IoError> {
         let mut request = self
             .client
@@ -89,6 +90,10 @@ impl SlideSource for S3SlideSource {
 
         if let Some(token) = cursor {
             request = request.continuation_token(token);
+        }
+
+        if let Some(prefix) = prefix {
+            request = request.prefix(prefix);
         }
 
         let response = request

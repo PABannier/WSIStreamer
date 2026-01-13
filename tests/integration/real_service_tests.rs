@@ -46,8 +46,36 @@ const MINIO_SECRET_KEY: &str = "minioadmin";
 /// Environment variable for the test SVS file path
 const SVS_PATH_ENV: &str = "WSI_TEST_SVS_PATH";
 
-/// Slide ID used in tests (the object key in MinIO)
+/// Environment variable to override the slide ID (for testing existing slides in bucket)
+const SLIDE_ID_ENV: &str = "WSI_TEST_SLIDE_ID";
+
+/// Default slide ID used in basic tests (backward compatibility)
 const TEST_SLIDE_ID: &str = "test-slide.svs";
+
+/// Get the slide ID to use for tests.
+///
+/// Priority:
+/// 1. WSI_TEST_SLIDE_ID environment variable (for testing existing slides)
+/// 2. Extracted filename from WSI_TEST_SVS_PATH
+/// 3. Default to "test-slide.svs"
+fn get_test_slide_id() -> String {
+    // First, check if a specific slide ID is provided
+    if let Ok(slide_id) = env::var(SLIDE_ID_ENV) {
+        return slide_id;
+    }
+
+    // Otherwise, extract filename from the SVS path
+    if let Some(path) = get_svs_path() {
+        if let Some(filename) = Path::new(&path).file_name() {
+            if let Some(name) = filename.to_str() {
+                return name.to_string();
+            }
+        }
+    }
+
+    // Fallback to default
+    "test-slide.svs".to_string()
+}
 
 /// Check if an error response indicates an unsupported format (LZW, Deflate, etc.)
 /// Note: JPEG 2000 is now supported, so it's not treated as an unsupported format.
@@ -1131,4 +1159,392 @@ async fn test_real_svs_slide_metadata() {
     }
 
     println!("Slide metadata test PASSED");
+}
+
+// =============================================================================
+// Comprehensive Tile Coverage Tests
+// =============================================================================
+
+/// Maximum number of tiles to test per level when the level has many tiles.
+/// For levels with fewer tiles than this threshold, all tiles are tested.
+const MAX_TILES_PER_LEVEL: u64 = 1000;
+
+/// Helper function to test a single tile and return the result
+async fn test_tile(
+    http_client: &reqwest::Client,
+    slide_id: &str,
+    level: usize,
+    x: u64,
+    y: u64,
+) -> Result<(), String> {
+    let tile_url = format!(
+        "{}/tiles/{}/{}/{}/{}.jpg",
+        SERVER_URL, slide_id, level, x, y
+    );
+
+    let response = http_client
+        .get(&tile_url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+
+        // Check if this is an unsupported format error
+        if is_unsupported_format_error(&body) {
+            // Don't count as failure - the server correctly rejected it
+            return Ok(());
+        }
+
+        return Err(format!("HTTP {}: {}", status.as_u16(), body));
+    }
+
+    // Verify the response is a valid JPEG
+    let tile_data = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read bytes: {}", e))?;
+
+    if !is_valid_jpeg(&tile_data) {
+        return Err(format!("Invalid JPEG response ({} bytes)", tile_data.len()));
+    }
+
+    Ok(())
+}
+
+/// Ensure the test slide is uploaded to MinIO.
+///
+/// Returns the slide ID that should be used for testing.
+async fn ensure_test_slide_uploaded() -> Result<String, String> {
+    let slide_id = get_test_slide_id();
+
+    // If WSI_TEST_SLIDE_ID is set, assume the slide already exists in the bucket
+    if env::var(SLIDE_ID_ENV).is_ok() {
+        println!("Using existing slide in bucket: {}", slide_id);
+        return Ok(slide_id);
+    }
+
+    let svs_path = match get_svs_path() {
+        Some(p) => p,
+        None => {
+            return Err(format!(
+                "{} environment variable not set. Set it to the path of a test SVS file.",
+                SVS_PATH_ENV
+            ));
+        }
+    };
+
+    if !Path::new(&svs_path).exists() {
+        return Err(format!("SVS file not found at: {}", svs_path));
+    }
+
+    let minio_client = create_minio_client().await;
+
+    if !slide_exists_in_minio(&minio_client, &slide_id).await {
+        println!("Uploading SVS file to MinIO as '{}'...", slide_id);
+        let svs_data =
+            std::fs::read(&svs_path).map_err(|e| format!("Failed to read SVS file: {}", e))?;
+        println!("SVS file size: {} bytes", svs_data.len());
+
+        upload_to_minio(&minio_client, &slide_id, svs_data)
+            .await
+            .map_err(|e| format!("Failed to upload SVS file to MinIO: {}", e))?;
+        println!("Upload complete.");
+    } else {
+        println!(
+            "SVS file '{}' already exists in MinIO, skipping upload.",
+            slide_id
+        );
+    }
+
+    Ok(slide_id)
+}
+
+/// Fetch slide metadata
+async fn fetch_slide_metadata(
+    http_client: &reqwest::Client,
+    slide_id: &str,
+) -> Result<serde_json::Value, String> {
+    let metadata_url = format!("{}/slides/{}", SERVER_URL, slide_id);
+    println!("Fetching slide metadata: {}", metadata_url);
+
+    let metadata_response = http_client
+        .get(&metadata_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch slide metadata: {}", e))?;
+
+    if !metadata_response.status().is_success() {
+        let body = metadata_response.text().await.unwrap_or_default();
+        return Err(format!("Failed to fetch slide metadata: {}", body));
+    }
+
+    metadata_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse slide metadata: {}", e))
+}
+
+/// Test all tiles at all pyramid levels.
+///
+/// This test iterates through EVERY tile at EVERY pyramid level and verifies
+/// that each tile can be decoded. This catches decode errors that only appear
+/// at specific tile positions (e.g., edge tiles, tiles with different compression).
+///
+/// NOTE: This test can take a long time for large slides. For level 0 (highest
+/// resolution), it samples tiles to keep the test practical while still providing
+/// good coverage. Lower resolution levels (1, 2, 3, etc.) are tested exhaustively
+/// since they have far fewer tiles.
+#[tokio::test]
+#[ignore]
+async fn test_real_svs_all_tiles_decode_successfully() {
+    // Check prerequisites
+    skip_if!(!is_minio_available().await, "MinIO is not available");
+    skip_if!(!is_server_available().await, "Server is not available");
+
+    let slide_id = match ensure_test_slide_uploaded().await {
+        Ok(id) => id,
+        Err(msg) => {
+            eprintln!("SKIPPED: {}", msg);
+            return;
+        }
+    };
+
+    // Create HTTP client for server requests
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let metadata = fetch_slide_metadata(&http_client, &slide_id)
+        .await
+        .expect("Failed to fetch metadata");
+
+    let levels = metadata["levels"]
+        .as_array()
+        .expect("Expected levels array in metadata");
+
+    println!(
+        "Slide '{}' has {} pyramid levels, testing tiles at each level...",
+        slide_id,
+        levels.len()
+    );
+
+    let mut total_tiles = 0usize;
+    let mut successful_tiles = 0usize;
+    let mut failed_tiles: Vec<(usize, u64, u64, String)> = Vec::new();
+
+    // Iterate through all levels
+    for level_info in levels {
+        let level = level_info["level"].as_u64().expect("Expected level index") as usize;
+        let tiles_x = level_info["tiles_x"].as_u64().expect("Expected tiles_x");
+        let tiles_y = level_info["tiles_y"].as_u64().expect("Expected tiles_y");
+        let total_level_tiles = tiles_x * tiles_y;
+
+        // Determine sampling strategy:
+        // - For smaller levels, test ALL tiles
+        // - For level 0 with many tiles, sample strategically
+        let (step_x, step_y) = if total_level_tiles <= MAX_TILES_PER_LEVEL {
+            (1, 1) // Test all tiles
+        } else {
+            // Calculate step to sample approximately MAX_TILES_PER_LEVEL tiles
+            // while ensuring we cover edges and corners
+            let step = ((total_level_tiles as f64) / (MAX_TILES_PER_LEVEL as f64))
+                .sqrt()
+                .ceil() as u64;
+            (step, step)
+        };
+
+        let tiles_to_test = tiles_x.div_ceil(step_x) * tiles_y.div_ceil(step_y);
+        println!(
+            "Level {}: {}x{} tiles ({} total), testing {} tiles (step: {}x{})",
+            level, tiles_x, tiles_y, total_level_tiles, tiles_to_test, step_x, step_y
+        );
+
+        // Test sampled tiles in a grid pattern
+        let mut y = 0;
+        while y < tiles_y {
+            let mut x = 0;
+            while x < tiles_x {
+                total_tiles += 1;
+
+                if let Err(e) = test_tile(&http_client, &slide_id, level, x, y).await {
+                    failed_tiles.push((level, x, y, e));
+                } else {
+                    successful_tiles += 1;
+                }
+
+                x += step_x;
+            }
+            y += step_y;
+        }
+
+        // Also test edge tiles if we're sampling (to catch edge-case issues)
+        if step_x > 1 || step_y > 1 {
+            // Test last column
+            for y in (0..tiles_y).step_by(step_y as usize) {
+                let x = tiles_x - 1;
+                total_tiles += 1;
+                if let Err(e) = test_tile(&http_client, &slide_id, level, x, y).await {
+                    failed_tiles.push((level, x, y, e));
+                } else {
+                    successful_tiles += 1;
+                }
+            }
+            // Test last row
+            for x in (0..tiles_x).step_by(step_x as usize) {
+                let y = tiles_y - 1;
+                total_tiles += 1;
+                if let Err(e) = test_tile(&http_client, &slide_id, level, x, y).await {
+                    failed_tiles.push((level, x, y, e));
+                } else {
+                    successful_tiles += 1;
+                }
+            }
+            // Test corner
+            total_tiles += 1;
+            if let Err(e) =
+                test_tile(&http_client, &slide_id, level, tiles_x - 1, tiles_y - 1).await
+            {
+                failed_tiles.push((level, tiles_x - 1, tiles_y - 1, e));
+            } else {
+                successful_tiles += 1;
+            }
+        }
+
+        println!(
+            "  Level {} complete: {}/{} tiles OK so far",
+            level, successful_tiles, total_tiles
+        );
+    }
+
+    // Report results
+    println!("\n========================================");
+    println!("TILE COVERAGE TEST RESULTS");
+    println!("========================================");
+    println!("Total tiles tested: {}", total_tiles);
+    println!("Successful: {}", successful_tiles);
+    println!("Failed: {}", failed_tiles.len());
+
+    if !failed_tiles.is_empty() {
+        println!("\nFailed tiles:");
+        for (level, x, y, error) in &failed_tiles {
+            println!("  Tile ({},{},{}): {}", level, x, y, error);
+        }
+    }
+
+    assert!(
+        failed_tiles.is_empty(),
+        "Expected all tiles to decode successfully, but {} out of {} tiles failed. See failed tiles above.",
+        failed_tiles.len(),
+        total_tiles
+    );
+
+    println!("\nAll {} tiles decoded successfully!", total_tiles);
+}
+
+/// Test ALL tiles at lower resolution levels (levels 1+).
+///
+/// Lower resolution levels have far fewer tiles and are faster to test exhaustively.
+/// This test catches decode errors that only appear at specific tile positions,
+/// like the "Unsupported image format" error that occurs at certain tiles.
+#[tokio::test]
+#[ignore]
+async fn test_real_svs_all_tiles_lower_levels() {
+    // Check prerequisites
+    skip_if!(!is_minio_available().await, "MinIO is not available");
+    skip_if!(!is_server_available().await, "Server is not available");
+
+    let slide_id = match ensure_test_slide_uploaded().await {
+        Ok(id) => id,
+        Err(msg) => {
+            eprintln!("SKIPPED: {}", msg);
+            return;
+        }
+    };
+
+    // Create HTTP client for server requests
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("Failed to create HTTP client");
+
+    let metadata = fetch_slide_metadata(&http_client, &slide_id)
+        .await
+        .expect("Failed to fetch metadata");
+
+    let levels = metadata["levels"]
+        .as_array()
+        .expect("Expected levels array in metadata");
+
+    println!(
+        "Slide '{}' has {} pyramid levels, testing ALL tiles at levels 1+ (skipping level 0)...",
+        slide_id,
+        levels.len()
+    );
+
+    let mut total_tiles = 0usize;
+    let mut successful_tiles = 0usize;
+    let mut failed_tiles: Vec<(usize, u64, u64, String)> = Vec::new();
+
+    // Skip level 0 (too many tiles), test all other levels exhaustively
+    for level_info in levels.iter().skip(1) {
+        let level = level_info["level"].as_u64().expect("Expected level index") as usize;
+        let tiles_x = level_info["tiles_x"].as_u64().expect("Expected tiles_x");
+        let tiles_y = level_info["tiles_y"].as_u64().expect("Expected tiles_y");
+
+        println!(
+            "Level {}: {}x{} tiles ({} total) - testing ALL",
+            level,
+            tiles_x,
+            tiles_y,
+            tiles_x * tiles_y
+        );
+
+        for y in 0..tiles_y {
+            for x in 0..tiles_x {
+                total_tiles += 1;
+
+                if let Err(e) = test_tile(&http_client, &slide_id, level, x, y).await {
+                    failed_tiles.push((level, x, y, e));
+                } else {
+                    successful_tiles += 1;
+                }
+            }
+        }
+
+        println!(
+            "  Level {} complete: {}/{} tiles OK so far",
+            level, successful_tiles, total_tiles
+        );
+    }
+
+    // Report results
+    println!("\n========================================");
+    println!("LOWER LEVELS TILE COVERAGE TEST RESULTS");
+    println!("========================================");
+    println!("Total tiles tested: {}", total_tiles);
+    println!("Successful: {}", successful_tiles);
+    println!("Failed: {}", failed_tiles.len());
+
+    if !failed_tiles.is_empty() {
+        println!("\nFailed tiles:");
+        for (level, x, y, error) in &failed_tiles {
+            println!("  Tile ({},{},{}): {}", level, x, y, error);
+        }
+    }
+
+    assert!(
+        failed_tiles.is_empty(),
+        "Expected all tiles to decode successfully, but {} out of {} tiles failed. See failed tiles above.",
+        failed_tiles.len(),
+        total_tiles
+    );
+
+    println!(
+        "\nAll {} tiles at lower levels decoded successfully!",
+        total_tiles
+    );
 }

@@ -2,188 +2,175 @@
 
 [![CI](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)](https://github.com/PABannier/WSIStreamer/actions/workflows/CI.yml/badge.svg)
 
-Whole Slide Images are often 1-10GB+ and live in object storage. Traditional viewers expect a local filesystem and force full downloads before a single tile can be served. WSI Streamer is built for the reality of cloud-native storage: it understands the slide formats, pulls only the bytes it needs, and returns JPEG tiles immediately.
+A tile server for Whole Slide Images stored in S3. One command to start serving tiles from your slides.
 
 ![WSI Streamer Banner](./assets/banner.png)
 
-[Quick Start](#quick-start) • [API](#api) • [How It Works](#how-it-works)
+## Quick Start
 
-## Highlights
+```bash
+# Start serving slides from S3
+wsi-streamer s3://my-slides-bucket
 
-- Streams tiles directly from S3 using range requests (no local files, no full downloads)
+# View a slide in your browser
+open http://localhost:3000/view/sample.svs
+```
+
+That's it. No configuration files, no local storage, no complex setup.
+
+## Why WSI Streamer?
+
+Whole Slide Images are often 1-10GB+ and live in object storage. Traditional viewers expect a local filesystem and force full downloads before a single tile can be served. WSI Streamer is built for cloud-native storage: it understands the slide formats, pulls only the bytes it needs via HTTP range requests, and returns JPEG tiles immediately.
+
+**Key features:**
+- Streams tiles directly from S3 using range requests (no local files)
+- Built-in web viewer with OpenSeadragon
 - Native Rust parsers for SVS and pyramidal TIFF
-- Signed URL authentication with HMAC-SHA256
-- Multi-level caching: block cache, metadata cache, and tile cache
-- Simple HTTP API for tiles and slide listing
+- Optional signed URL authentication with HMAC-SHA256
+- Multi-level caching: slides, blocks, and tiles
 
-## Quick Start (Docker + MinIO)
-
-A local development stack is provided via `docker-compose.yml`.
+## Installation
 
 ```bash
-# Start WSI Streamer + MinIO
-docker compose up --build
-
-# Health check
-curl http://localhost:3000/health
-
-# Fetch a tile (auth disabled in compose)
-curl -o tile.jpg http://localhost:3000/tiles/slide.svs/0/0/0.jpg
-```
-
-Upload slides with the MinIO console at `http://localhost:9001` (login: `minioadmin` / `minioadmin`) or use `mc` as shown in `docker-compose.yml`.
-
-## Install the Binary
-
-Use Cargo to install the binary locally:
-
-```bash
+# Install with Cargo
 cargo install --path .
-```
 
-This installs `wsi-streamer` into your Cargo bin directory (usually `~/.cargo/bin`).
-
-## Build From Source
-
-```bash
-# Debug build
-cargo build
-
-# Optimized release build
+# Or build from source
 cargo build --release
-
-# Run directly
-cargo run -- --help
 ```
 
-The release binary is located at `target/release/wsi-streamer`.
+## Usage
 
-## Running the Server
-
-WSI Streamer reads configuration from CLI flags and `WSI_` environment variables.
+### Basic Usage
 
 ```bash
-export WSI_S3_BUCKET="my-slides"
-export WSI_S3_REGION="us-east-1"
-export WSI_AUTH_SECRET="super-secret"
+# Serve slides from an S3 bucket
+wsi-streamer s3://my-slides
 
-# Optional for MinIO or other S3-compatible services
-export WSI_S3_ENDPOINT="http://localhost:9000"
+# Custom port
+wsi-streamer s3://my-slides --port 8080
 
-wsi-streamer --host 0.0.0.0 --port 3000
+# With MinIO or other S3-compatible storage
+wsi-streamer s3://slides --s3-endpoint http://localhost:9000
 ```
 
-The AWS SDK default credential chain is used (env vars, shared config, IAM roles, etc.).
+### View Slides
+
+Open slides directly in your browser:
+
+```
+http://localhost:3000/view/sample.svs
+http://localhost:3000/view/folder%2Fsubfolder%2Fslide.svs
+```
+
+The built-in viewer provides pan, zoom, and navigation with a dark theme optimized for slide viewing.
+
+### API Access
+
+```bash
+# List available slides
+curl http://localhost:3000/slides
+
+# Get slide metadata
+curl http://localhost:3000/slides/sample.svs
+
+# Fetch a tile (level 0, position 0,0)
+curl -o tile.jpg http://localhost:3000/tiles/sample.svs/0/0/0.jpg
+
+# Get a thumbnail
+curl -o thumb.jpg "http://localhost:3000/slides/sample.svs/thumbnail?max_size=256"
+```
+
+### Production with Authentication
+
+```bash
+# Enable HMAC-SHA256 authentication
+wsi-streamer s3://my-slides --auth-enabled --auth-secret "$SECRET"
+
+# Generate signed URLs with the CLI
+wsi-streamer sign --path /tiles/slide.svs/0/0/0.jpg --secret "$SECRET" \
+  --base-url http://localhost:3000
+```
+
+When auth is enabled, the web viewer automatically handles authentication - no additional setup required.
+
+### Validate Configuration
+
+```bash
+# Check S3 connectivity
+wsi-streamer check s3://my-slides
+
+# List available slides
+wsi-streamer check s3://my-slides --list-slides
+
+# Test a specific slide
+wsi-streamer check s3://my-slides --test-slide sample.svs
+```
+
+## Commands
+
+WSI Streamer provides three commands:
+
+| Command | Description |
+|---------|-------------|
+| `serve` (default) | Start the tile server |
+| `sign` | Generate signed URLs for authenticated access |
+| `check` | Validate configuration and test S3 connectivity |
+
+Run `wsi-streamer --help` for all options.
 
 ## Configuration
 
-Common options (CLI flags mirror these env vars):
+All options can be set via CLI flags or environment variables:
 
-| Env Var | Default | Description |
-| --- | --- | --- |
-| `WSI_HOST` | `0.0.0.0` | Bind address |
-| `WSI_PORT` | `3000` | HTTP port |
-| `WSI_S3_BUCKET` | (required) | S3 bucket containing slides |
-| `WSI_S3_ENDPOINT` | (none) | Custom endpoint for S3-compatible storage |
-| `WSI_S3_REGION` | `us-east-1` | AWS region |
-| `WSI_AUTH_ENABLED` | `true` | Enable signed URL auth |
-| `WSI_AUTH_SECRET` | (required if auth enabled) | HMAC secret |
-| `WSI_CACHE_SLIDES` | `100` | Max slides in registry |
-| `WSI_CACHE_BLOCKS` | `100` | Blocks cached per slide (256KB each) |
-| `WSI_CACHE_TILES` | `104857600` | Tile cache size in bytes |
-| `WSI_BLOCK_SIZE` | `262144` | Block cache size in bytes |
-| `WSI_JPEG_QUALITY` | `80` | Default JPEG quality |
-| `WSI_CACHE_MAX_AGE` | `3600` | Cache-Control max-age (seconds) |
-| `WSI_CORS_ORIGINS` | (any) | Comma-separated CORS origins |
+| Option | Env Var | Default | Description |
+|--------|---------|---------|-------------|
+| `--host` | `WSI_HOST` | `0.0.0.0` | Bind address |
+| `--port` | `WSI_PORT` | `3000` | HTTP port |
+| `--s3-bucket` | `WSI_S3_BUCKET` | - | S3 bucket name |
+| `--s3-endpoint` | `WSI_S3_ENDPOINT` | - | Custom S3 endpoint |
+| `--s3-region` | `WSI_S3_REGION` | `us-east-1` | AWS region |
+| `--auth-enabled` | `WSI_AUTH_ENABLED` | `false` | Enable authentication |
+| `--auth-secret` | `WSI_AUTH_SECRET` | - | HMAC secret key |
+| `--cache-slides` | `WSI_CACHE_SLIDES` | `100` | Max slides in cache |
+| `--cache-tiles` | `WSI_CACHE_TILES` | `100MB` | Tile cache size |
+| `--jpeg-quality` | `WSI_JPEG_QUALITY` | `80` | Default JPEG quality |
+| `--cors-origins` | `WSI_CORS_ORIGINS` | any | Allowed CORS origins |
 
-Run `wsi-streamer --help` for the full CLI.
+## API Endpoints
 
-## API
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /view/{slide_id}` | Web viewer for a slide |
+| `GET /tiles/{slide_id}/{level}/{x}/{y}.jpg` | Fetch a tile |
+| `GET /slides` | List available slides |
+| `GET /slides/{slide_id}` | Get slide metadata |
+| `GET /slides/{slide_id}/thumbnail` | Get slide thumbnail |
+| `GET /slides/{slide_id}/dzi` | Get DZI descriptor |
 
-### Tiles
+See [API_SPECIFICATIONS.md](./API_SPECIFICATIONS.md) for complete documentation.
 
-```
-GET /tiles/{slide_id}/{level}/{x}/{y}.jpg
-```
-
-- `slide_id` is the S3 object key. If the key contains `/`, URL-encode it (e.g. `slides%2Fcase-01.svs`).
-- `level` is the pyramid level (0 = highest resolution)
-- `x`, `y` are tile indices (0-based)
-- Optional query params:
-  - `quality` (1-100)
-  - `exp`, `sig` for signed URLs
-
-Example:
+## Docker
 
 ```bash
-curl -o tile.jpg \
-  "http://localhost:3000/tiles/slides%2Fcase-01.svs/0/10/12.jpg?quality=80&exp=1735689600&sig=..."
+# Start with Docker Compose (includes MinIO)
+docker compose up --build
+
+# Access MinIO console at http://localhost:9001
+# Login: minioadmin / minioadmin
 ```
 
-### Slides
+## Supported Formats
 
-```
-GET /slides?limit=100&cursor=...
-```
+| Format | Extensions | Compression |
+|--------|------------|-------------|
+| Aperio SVS | `.svs` | JPEG, JPEG 2000 |
+| Pyramidal TIFF | `.tif`, `.tiff` | JPEG, JPEG 2000 |
 
-Returns a JSON list of `.svs`, `.tif`, and `.tiff` objects in the bucket.
+Files must be tiled (not stripped) and pyramidal. Unsupported files return `415 Unsupported Media Type`.
 
-### Health
-
-```
-GET /health
-```
-
-Returns JSON with `status` and `version`.
-
-## Authentication (Signed URLs)
-
-When auth is enabled, requests must include `exp` (Unix timestamp) and `sig` (hex HMAC-SHA256). The signature is computed over the request path and canonical query string (sorted by key/value), excluding `sig`.
-
-Signature base string:
-
-```
-{path}?{canonical_query}
-```
-
-Where `canonical_query` includes `exp` plus any other params (e.g. `quality`) sorted by key. Example canonical query:
-
-```
-exp=1735689600&quality=80
-```
-
-The server will reject missing, expired, or invalid signatures with `401`.
-
-## Format Support
-
-Supported slide formats (strict subset):
-
-- Aperio SVS
-- Pyramidal TIFF / BigTIFF
-- Tiled images only (no strips)
-
-- JPEG or JPEG 2000 compression
-
-Unsupported files return `415 Unsupported Media Type` with a helpful error.
-
-## How It Works
-
-1. **Range-based I/O**: slide data is fetched from S3 with HTTP range requests.
-2. **Format parsing**: the TIFF structure is parsed to locate tile offsets and sizes.
-3. **Tile extraction**: only the requested tile bytes are fetched.
-4. **Decode + re-encode**: tiles are decoded (JPEG/JPEG 2000) and re-encoded as JPEG.
-5. **Caching**:
-   - Block cache for range reads (default 256KB blocks)
-   - Metadata cache for parsed slide structure
-   - Tile cache for encoded JPEG tiles
-
-This keeps cold-start latency and S3 request counts low without requiring local storage.
-
-## Project Status
-
-WSI Streamer is focused on a tight, production-useful subset of WSI formats. If you need broader vendor support (NDPI, MRXS, DICOM), open an issue or contribute.
-
-## Architecture Overview
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -236,11 +223,10 @@ WSI Streamer is focused on a tight, production-useful subset of WSI formats. If 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](./LICENSE).
 
 ## Contributing
 
-Issues and pull requests are welcome. If you are adding new formats or storage backends, please include tests or sample fixtures where possible.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.

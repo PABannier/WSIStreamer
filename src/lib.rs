@@ -12,7 +12,7 @@ pub mod slide;
 pub mod tile;
 
 // Re-export commonly used types
-pub use config::Config;
+pub use config::{CheckConfig, Cli, Command, Config, ServeConfig, SignConfig, SignOutputFormat};
 pub use error::{FormatError, IoError, TiffError, TileError};
 pub use format::tiff::{
     check_compression, check_tile_tags, check_tiled, parse_u32_array, parse_u64_array,

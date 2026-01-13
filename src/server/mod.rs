@@ -17,13 +17,16 @@
 //! ```
 
 pub mod auth;
+pub mod dzi;
 pub mod handlers;
 pub mod routes;
+pub mod viewer;
 
 pub use auth::{auth_middleware, AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth};
 pub use handlers::{
-    health_handler, slide_metadata_handler, slides_handler, tile_handler, AppState, ErrorResponse,
-    HealthResponse, LevelMetadataResponse, SlideMetadataResponse, SlidesQueryParams,
-    SlidesResponse, TilePathParams, TileQueryParams,
+    dzi_descriptor_handler, health_handler, slide_metadata_handler, slides_handler,
+    thumbnail_handler, tile_handler, viewer_handler, AppState, ErrorResponse, HealthResponse,
+    LevelMetadataResponse, SlideMetadataResponse, SlidesQueryParams, SlidesResponse,
+    ThumbnailQueryParams, TilePathParams, TileQueryParams,
 };
 pub use routes::{create_dev_router, create_production_router, create_router, RouterConfig};
