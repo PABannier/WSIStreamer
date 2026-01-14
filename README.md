@@ -6,10 +6,14 @@
 
 A modern, cloud-native tile server for Whole Slide Images. One command to start serving tiles directly from S3.
 
-![WSI Streamer Banner](./assets/banner.png)
+![Video demo](https://imgur.com/a/x6mKjn6)
 
-```bash
-wsi-streamer s3://my-slides-bucket
+```shell
+# Installation (requires Rust, see alternatives below)
+cargo install wsi-streamer
+
+# On your local machine
+wsi-streamer s3://my-slides-bucket --s3-region eu-west-3
 ```
 
 That's it. No configuration files, no local storage, no complex setup. Open `http://localhost:3000/view/sample.svs` in your browser to view a slide.
