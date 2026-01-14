@@ -197,7 +197,12 @@ fn init_logging(verbose: bool) {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| env_filter.into()),
         )
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_target(false)
+                .without_time(),
+        )
         .init();
 }
 

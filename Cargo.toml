@@ -52,7 +52,7 @@ clap = { version = "4", features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # JPEG 2000 support
-jpeg2k = "0.8"
+jpeg2k = "0.10"
 
 [dev-dependencies]
 aws-smithy-runtime = "1"
