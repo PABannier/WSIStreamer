@@ -39,13 +39,20 @@ pub fn generate_viewer_html(
     let tile_size = metadata.levels.first().map(|l| l.tile_width).unwrap_or(256);
 
     // Calculate max level for OpenSeadragon (OSD uses inverted levels)
-    let max_level = metadata.level_count.saturating_sub(1);
+    let actual_level_count = metadata.levels.len();
+    let max_level = actual_level_count.saturating_sub(1);
 
     // Build level dimensions JSON for the tile source
+    // Include original level index to handle filtered levels correctly
     let level_dimensions: Vec<String> = metadata
         .levels
         .iter()
-        .map(|l| format!("{{ width: {}, height: {} }}", l.width, l.height))
+        .map(|l| {
+            format!(
+                "{{ level: {}, width: {}, height: {} }}",
+                l.level, l.width, l.height
+            )
+        })
         .collect();
 
     // Escape user-controlled values to prevent XSS
@@ -59,7 +66,7 @@ pub fn generate_viewer_html(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WSI Viewer - {escaped_slide_id}</title>
-    <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/openseadragon.min.js"></script>
     <style>
         * {{
             margin: 0;
@@ -195,6 +202,12 @@ pub fn generate_viewer_html(
         const levelCount = {level_count};
         const maxLevel = {max_level};
 
+        // Check if OpenSeadragon loaded
+        if (typeof OpenSeadragon === 'undefined') {{
+            document.querySelector('.loading').textContent = 'Error: Viewer library failed to load.';
+            throw new Error('OpenSeadragon library not loaded');
+        }}
+
         // Create custom tile source
         const tileSource = {{
             height: {height},
@@ -224,7 +237,9 @@ pub fn generate_viewer_html(
             getTileUrl: function(level, x, y) {{
                 // Map OSD level to our pyramid level (inverted)
                 const ourLevel = maxLevel - level;
-                return "{base_url}/tiles/{encoded_slide_id}/" + ourLevel + "/" + x + "/" + y + ".jpg{auth_query}";
+                // Use original level index from metadata for tile request
+                const originalLevel = levelDimensions[ourLevel].level;
+                return "{base_url}/tiles/{encoded_slide_id}/" + originalLevel + "/" + x + "/" + y + ".jpg{auth_query}";
             }}
         }};
 
@@ -256,6 +271,8 @@ pub fn generate_viewer_html(
             immediateRender: false,
             crossOriginPolicy: "Anonymous"
         }});
+
+        console.log('[DEBUG] OpenSeadragon viewer created');
 
         // Track errors
         let errorCount = 0;
@@ -322,7 +339,7 @@ pub fn generate_viewer_html(
         escaped_format = escaped_format,
         width = metadata.width,
         height = metadata.height,
-        level_count = metadata.level_count,
+        level_count = actual_level_count,
         tile_size = tile_size,
         level_dimensions = level_dimensions.join(", "),
         max_level = max_level,
