@@ -69,7 +69,7 @@ async fn run_serve(config: ServeConfig) -> ExitCode {
     );
 
     // Create S3 client
-    let s3_client = create_s3_client(config.s3_endpoint.as_deref()).await;
+    let s3_client = create_s3_client(config.s3_endpoint.as_deref(), &config.s3_region).await;
 
     // Test S3 connectivity
     info!("");
@@ -150,8 +150,8 @@ fn print_banner() {
     let version = env!("CARGO_PKG_VERSION");
     info!("");
     info!("╭─────────────────────────────────────────────────────────────────╮");
-    info!("│         WSI Streamer v{:<41}│", version);
-    info!("│         Whole Slide Image Tile Server                          │");
+    info!("│         WSI Streamer v{:<42}│", version);
+    info!("│         Whole Slide Image Tile Server                           │");
     info!("╰─────────────────────────────────────────────────────────────────╯");
     info!("");
 }
@@ -356,7 +356,7 @@ async fn run_check(config: CheckConfig) -> ExitCode {
     // Test S3 connectivity
     print!("Testing S3 connection... ");
 
-    let s3_client = create_s3_client(config.s3_endpoint.as_deref()).await;
+    let s3_client = create_s3_client(config.s3_endpoint.as_deref(), &config.s3_region).await;
 
     match s3_client
         .list_objects_v2()

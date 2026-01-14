@@ -12,9 +12,42 @@ permissions:
   packages: write
 
 jobs:
+  e2e-tests: # Must pass before any release artifacts are created
+    name: E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-e2e-
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Run E2E tests
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          WSI_S3_BUCKET: tcga-wsi-slides
+          WSI_S3_REGION: eu-west-3
+        run: ./scripts/e2e_test.sh
+
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    needs: e2e-tests
     strategy:
       fail-fast: false
       matrix:
@@ -106,6 +139,7 @@ jobs:
   docker:
     name: Build and push Docker image
     runs-on: ubuntu-latest
+    needs: e2e-tests
 
     steps:
       - uses: actions/checkout@v4
@@ -151,6 +185,7 @@ jobs:
   publish-crate:
     name: Publish to crates.io
     runs-on: ubuntu-latest
+    needs: e2e-tests
 
     steps:
       - uses: actions/checkout@v4

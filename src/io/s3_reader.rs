@@ -136,19 +136,21 @@ impl RangeReader for S3RangeReader {
     }
 }
 
-/// Create an S3 client with optional custom endpoint.
+/// Create an S3 client with optional custom endpoint and region.
 ///
 /// Use a custom endpoint for S3-compatible services like MinIO:
 /// ```ignore
-/// let client = create_s3_client(Some("http://localhost:9000")).await;
+/// let client = create_s3_client(Some("http://localhost:9000"), "us-east-1").await;
 /// ```
 ///
 /// For AWS S3, pass `None` to use the default endpoint:
 /// ```ignore
-/// let client = create_s3_client(None).await;
+/// let client = create_s3_client(None, "us-east-1").await;
 /// ```
-pub async fn create_s3_client(endpoint_url: Option<&str>) -> Client {
-    let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+pub async fn create_s3_client(endpoint_url: Option<&str>, region: &str) -> Client {
+    let region = aws_config::Region::new(region.to_string());
+    let mut config_loader =
+        aws_config::defaults(aws_config::BehaviorVersion::latest()).region(region);
 
     if let Some(endpoint) = endpoint_url {
         config_loader = config_loader.endpoint_url(endpoint);
