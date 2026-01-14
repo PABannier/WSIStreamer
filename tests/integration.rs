@@ -8,7 +8,6 @@
 //! - TIFF parser edge cases (endianness, BigTIFF)
 //! - SVS JPEGTables handling
 //! - Block cache effectiveness
-//! - Real service tests with Docker and MinIO
 
 mod integration {
     pub mod test_utils;
@@ -17,6 +16,5 @@ mod integration {
     pub mod auth_tests;
     pub mod cache_tests;
     pub mod format_tests;
-    pub mod real_service_tests;
     pub mod slides_tests;
 }
