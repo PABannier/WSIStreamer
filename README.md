@@ -6,7 +6,7 @@
 
 A modern, cloud-native tile server for Whole Slide Images. One command to start serving tiles directly from S3.
 
-![Video demo](https://imgur.com/a/x6mKjn6)
+![Video demo](https://i.imgur.com/IHMiQSz.gif)
 
 ```shell
 # Installation (requires Rust, see alternatives below)
@@ -32,13 +32,13 @@ Whole Slide Images are large (1-10GB+) and typically live in object storage. Tra
 
 Install from [crates.io](https://crates.io/crates/wsi-streamer):
 
-```bash
+```shell
 cargo install wsi-streamer
 ```
 
 Or build from source:
 
-```bash
+```shell
 git clone https://github.com/PABannier/WSIStreamer.git
 cd WSIStreamer
 cargo build --release
@@ -46,7 +46,7 @@ cargo build --release
 
 Or run with Docker:
 
-```bash
+```shell
 # Pull from GitHub Container Registry
 docker run -p 3000:3000 -e WSI_S3_BUCKET=my-bucket ghcr.io/pabannier/wsistreamer:latest
 
@@ -58,7 +58,7 @@ docker compose up --build
 
 ### Basic
 
-```bash
+```shell
 # Serve slides from S3
 wsi-streamer s3://my-slides
 
@@ -71,7 +71,7 @@ wsi-streamer s3://slides --s3-endpoint http://localhost:9000
 
 ### API
 
-```bash
+```shell
 # List slides
 curl http://localhost:3000/slides
 
@@ -87,7 +87,7 @@ curl "http://localhost:3000/slides/sample.svs/thumbnail?max_size=256" -o thumb.j
 
 ### Authentication
 
-```bash
+```shell
 # Enable HMAC-SHA256 authentication
 wsi-streamer s3://my-slides --auth-enabled --auth-secret "$SECRET"
 
@@ -99,7 +99,7 @@ The web viewer handles authentication automatically when enabled.
 
 ### Validation
 
-```bash
+```shell
 # Check S3 connectivity
 wsi-streamer check s3://my-slides
 
