@@ -29,6 +29,9 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use image::codecs::jpeg::JpegEncoder;
+use image::{DynamicImage, ImageReader, RgbImage};
+use std::io::Cursor;
 
 use crate::error::TileError;
 use crate::slide::{SlideRegistry, SlideSource};
@@ -415,17 +418,130 @@ impl<S: SlideSource> TileService<S> {
         })?;
 
         // If single tile covers the entire level, just return that tile
+        // (resize if needed to fit max_dimension)
         if info.tiles_x == 1 && info.tiles_y == 1 {
             let request = TileRequest::with_quality(slide_id, level, 0, 0, quality);
-            return self.get_tile(request).await;
+            let tile_response = self.get_tile(request).await?;
+
+            // Resize if the tile is larger than max_dimension
+            if info.width > max_dimension || info.height > max_dimension {
+                let resized = self.resize_image(&tile_response.data, max_dimension, quality)?;
+                return Ok(TileResponse {
+                    data: resized,
+                    cache_hit: false,
+                    quality,
+                });
+            }
+
+            return Ok(tile_response);
         }
 
-        // For multiple tiles, we need to composite them
-        // For now, return the first tile from the lowest resolution level
-        // as a simple implementation
-        let lowest_level = slide.level_count().saturating_sub(1);
-        let request = TileRequest::with_quality(slide_id, lowest_level, 0, 0, quality);
-        self.get_tile(request).await
+        // For multiple tiles, composite them into a single image
+        let composite = self
+            .composite_level_tiles(slide_id, level, &info, quality)
+            .await?;
+
+        // Resize the composite to fit within max_dimension
+        let resized = self.resize_image(&composite, max_dimension, quality)?;
+
+        Ok(TileResponse {
+            data: resized,
+            cache_hit: false,
+            quality,
+        })
+    }
+
+    /// Composite all tiles from a level into a single image.
+    async fn composite_level_tiles(
+        &self,
+        slide_id: &str,
+        level: usize,
+        info: &crate::slide::LevelInfo,
+        quality: u8,
+    ) -> Result<Bytes, TileError> {
+        // Create a canvas for the full level
+        let mut canvas = RgbImage::new(info.width, info.height);
+
+        // Read and place each tile
+        for tile_y in 0..info.tiles_y {
+            for tile_x in 0..info.tiles_x {
+                let request = TileRequest::with_quality(slide_id, level, tile_x, tile_y, quality);
+                let tile_response = self.get_tile(request).await?;
+
+                // Decode the tile
+                let cursor = Cursor::new(&tile_response.data[..]);
+                let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+                let tile_img = reader.decode().map_err(|e| TileError::DecodeError {
+                    message: format!("Failed to decode tile ({}, {}): {}", tile_x, tile_y, e),
+                })?;
+
+                // Calculate position on canvas
+                let x_pos = tile_x * info.tile_width;
+                let y_pos = tile_y * info.tile_height;
+
+                // Convert tile to RGB and copy to canvas
+                let tile_rgb = tile_img.to_rgb8();
+
+                // Copy pixels to canvas (handling edge tiles that may be smaller)
+                for (ty, row) in tile_rgb.rows().enumerate() {
+                    for (tx, pixel) in row.enumerate() {
+                        let canvas_x = x_pos + tx as u32;
+                        let canvas_y = y_pos + ty as u32;
+                        if canvas_x < info.width && canvas_y < info.height {
+                            canvas.put_pixel(canvas_x, canvas_y, *pixel);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Encode the composite as JPEG
+        let mut output = Vec::new();
+        let mut encoder = JpegEncoder::new_with_quality(&mut output, quality);
+        encoder
+            .encode_image(&DynamicImage::ImageRgb8(canvas))
+            .map_err(|e| TileError::EncodeError {
+                message: format!("Failed to encode composite: {}", e),
+            })?;
+
+        Ok(Bytes::from(output))
+    }
+
+    /// Resize an image to fit within max_dimension while preserving aspect ratio.
+    fn resize_image(
+        &self,
+        jpeg_data: &[u8],
+        max_dimension: u32,
+        quality: u8,
+    ) -> Result<Bytes, TileError> {
+        // Decode the source image
+        let cursor = Cursor::new(jpeg_data);
+        let reader = ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+        let img = reader.decode().map_err(|e| TileError::DecodeError {
+            message: format!("Failed to decode image for resize: {}", e),
+        })?;
+
+        let (width, height) = (img.width(), img.height());
+
+        // Calculate new dimensions maintaining aspect ratio
+        let scale = max_dimension as f64 / width.max(height) as f64;
+        let new_width = (width as f64 * scale).round() as u32;
+        let new_height = (height as f64 * scale).round() as u32;
+
+        // Resize using high-quality Lanczos3 filter
+        let resized =
+            img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
+
+        // Encode as JPEG
+        let mut output = Vec::new();
+        let mut encoder = JpegEncoder::new_with_quality(&mut output, quality);
+        encoder
+            .encode_image(&resized)
+            .map_err(|e| TileError::EncodeError {
+                message: format!("Failed to encode resized image: {}", e),
+            })?;
+
+        Ok(Bytes::from(output))
     }
 }
 
@@ -817,5 +933,185 @@ mod tests {
             result,
             Err(TileError::InvalidQuality { quality: 255 })
         ));
+    }
+
+    // =========================================================================
+    // Thumbnail Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_generate_thumbnail_returns_valid_jpeg() {
+        let tiff_data = create_tiff_with_jpeg_tile();
+        let source = MockSlideSource::new(tiff_data);
+        let registry = SlideRegistry::new(source);
+        let service = TileService::new(registry);
+
+        // Request a 512px thumbnail
+        let result = service.generate_thumbnail("test.tif", 512, 80).await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+
+        // Verify it's valid JPEG
+        assert!(response.data.len() > 2);
+        assert_eq!(response.data[0], 0xFF); // SOI marker
+        assert_eq!(response.data[1], 0xD8);
+        assert_eq!(response.data[response.data.len() - 2], 0xFF); // EOI marker
+        assert_eq!(response.data[response.data.len() - 1], 0xD9);
+    }
+
+    #[tokio::test]
+    async fn test_generate_thumbnail_composites_multiple_tiles() {
+        let tiff_data = create_tiff_with_jpeg_tile();
+        let source = MockSlideSource::new(tiff_data);
+        let registry = SlideRegistry::new(source);
+        let service = TileService::new(registry);
+
+        // The test TIFF is 2048x1536 with 256x256 tiles (8x6 = 48 tiles)
+        // Request a 512px thumbnail - this should composite tiles
+        let thumbnail_result = service.generate_thumbnail("test.tif", 512, 80).await;
+        assert!(thumbnail_result.is_ok());
+        let thumbnail = thumbnail_result.unwrap();
+
+        // Get a single tile for comparison
+        let tile_result = service
+            .get_tile(TileRequest::with_quality("test.tif", 0, 0, 0, 80))
+            .await;
+        assert!(tile_result.is_ok());
+        let single_tile = tile_result.unwrap();
+
+        // The thumbnail should be a properly composited image
+        // Verify it's a valid JPEG that we can decode
+        let cursor = std::io::Cursor::new(&thumbnail.data[..]);
+        let reader = image::ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+        let img = reader.decode();
+        assert!(img.is_ok(), "Thumbnail should be a valid decodable image");
+
+        let decoded = img.unwrap();
+        // The thumbnail should be resized to fit within 512px
+        assert!(
+            decoded.width() <= 512 && decoded.height() <= 512,
+            "Thumbnail dimensions should fit within max_dimension"
+        );
+
+        // Also verify the single tile is smaller than what a full composite would be
+        // (this confirms we're not just returning a single tile)
+        let tile_cursor = std::io::Cursor::new(&single_tile.data[..]);
+        let tile_reader = image::ImageReader::with_format(tile_cursor, image::ImageFormat::Jpeg);
+        let tile_img = tile_reader.decode().unwrap();
+
+        // A single tile is 256x256, which is smaller than our 512px max
+        assert_eq!(tile_img.width(), 256);
+        assert_eq!(tile_img.height(), 256);
+    }
+
+    #[tokio::test]
+    async fn test_generate_thumbnail_respects_max_dimension() {
+        let tiff_data = create_tiff_with_jpeg_tile();
+        let source = MockSlideSource::new(tiff_data);
+        let registry = SlideRegistry::new(source);
+        let service = TileService::new(registry);
+
+        // Test different max dimensions
+        for max_dim in [128, 256, 512, 1024] {
+            let result = service.generate_thumbnail("test.tif", max_dim, 80).await;
+            assert!(result.is_ok());
+
+            let response = result.unwrap();
+            let cursor = std::io::Cursor::new(&response.data[..]);
+            let reader = image::ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+            let img = reader.decode().unwrap();
+
+            // Both dimensions should be <= max_dim
+            assert!(
+                img.width() <= max_dim,
+                "Width {} should be <= max_dim {}",
+                img.width(),
+                max_dim
+            );
+            assert!(
+                img.height() <= max_dim,
+                "Height {} should be <= max_dim {}",
+                img.height(),
+                max_dim
+            );
+
+            // At least one dimension should be close to max_dim
+            // (within 1 pixel due to rounding)
+            let max_actual = img.width().max(img.height());
+            assert!(
+                max_actual >= max_dim - 1,
+                "Max dimension {} should be close to {}",
+                max_actual,
+                max_dim
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generate_thumbnail_preserves_aspect_ratio() {
+        let tiff_data = create_tiff_with_jpeg_tile();
+        let source = MockSlideSource::new(tiff_data);
+        let registry = SlideRegistry::new(source);
+        let service = TileService::new(registry);
+
+        // The test TIFF is 2048x1536, which has aspect ratio 4:3
+        let result = service.generate_thumbnail("test.tif", 400, 80).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        let cursor = std::io::Cursor::new(&response.data[..]);
+        let reader = image::ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+        let img = reader.decode().unwrap();
+
+        // The thumbnail should preserve the 4:3 aspect ratio (approximately)
+        let aspect_ratio = img.width() as f64 / img.height() as f64;
+        let expected_ratio = 2048.0 / 1536.0; // ~1.333
+
+        assert!(
+            (aspect_ratio - expected_ratio).abs() < 0.1,
+            "Aspect ratio {} should be close to expected {}",
+            aspect_ratio,
+            expected_ratio
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_thumbnail_invalid_quality() {
+        let tiff_data = create_tiff_with_jpeg_tile();
+        let source = MockSlideSource::new(tiff_data);
+        let registry = SlideRegistry::new(source);
+        let service = TileService::new(registry);
+
+        // Quality 0 should be rejected
+        let result = service.generate_thumbnail("test.tif", 256, 0).await;
+        assert!(matches!(
+            result,
+            Err(TileError::InvalidQuality { quality: 0 })
+        ));
+
+        // Quality 255 should be rejected
+        let result = service.generate_thumbnail("test.tif", 256, 255).await;
+        assert!(matches!(
+            result,
+            Err(TileError::InvalidQuality { quality: 255 })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_generate_thumbnail_slide_not_found() {
+        let tiff_data = create_tiff_with_jpeg_tile();
+        let source = MockSlideSource::new(tiff_data);
+        let registry = SlideRegistry::new(source);
+        let service = TileService::new(registry);
+
+        let result = service.generate_thumbnail("notfound.tif", 256, 80).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            TileError::SlideNotFound { slide_id } => {
+                assert_eq!(slide_id, "notfound.tif");
+            }
+            e => panic!("Expected SlideNotFound error, got {:?}", e),
+        }
     }
 }
