@@ -20,7 +20,7 @@ That's it. No configuration files, no local storage, no complex setup. Open `htt
 
 ## Why WSI Streamer?
 
-Whole Slide Images are large (1-10GB+) and typically live in object storage. Traditional viewers require downloading entire files before serving a single tile. WSI Streamer takes a different approach: it understands slide formats natively, fetches only the bytes needed via HTTP range requests, and returns JPEG tiles immediately.
+Whole Slide Images are large (1-3GB+) and typically live in object storage. Traditional viewers require downloading entire files before serving a single tile. WSIStreamer takes a different approach: it understands slide formats natively, fetches only the bytes needed via HTTP range requests, and returns JPEG tiles immediately.
 
 - **Range-based streaming** — fetches only the bytes needed for each tile, no local files
 - **Built-in viewer** — OpenSeadragon-based web viewer with pan, zoom, and dark theme
@@ -152,6 +152,10 @@ See [API_SPECIFICATIONS.md](./API_SPECIFICATIONS.md) for complete documentation.
 | Pyramidal TIFF | `.tif`, `.tiff` | JPEG, JPEG 2000 |
 
 Files must be tiled (not stripped) and pyramidal.
+
+## In the media
+
+- **January 17th, 2026**: front page of [Hacker News](https://news.ycombinator.com/item?id=46656358) and [Rust subreddit](https://www.reddit.com/r/rust/comments/1qf823k/wsistreamer_streaming_gigabyte_medical_images/)
 
 ## License
 
